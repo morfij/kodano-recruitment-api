@@ -49,5 +49,16 @@ services:
     ports:
       - "${MAILPIT_PORT:-8025}:8025"
 
+  # Optional database UI: docker compose --profile tools up -d
+  adminer:
+    image: adminer:5
+    profiles: [tools]
+    environment:
+      ADMINER_DEFAULT_SERVER: database
+    ports:
+      - "${ADMINER_PORT:-8081}:8080"
+    depends_on:
+      - database
+
 volumes:
   database_data:
