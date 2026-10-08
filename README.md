@@ -34,7 +34,7 @@ docker compose exec php bin/console doctrine:fixtures:load -n
 
 This empties the database first, including the operation log. Demo data is written through Doctrine, not the API, so it produces no log entries and no e-mails. The command is available only with dev dependencies installed.
 
-All further commands are run from the repository root.
+All further commands are run from the repository root. `make help` lists short aliases for the common ones (`make up`, `make test`, `make qa`, …).
 
 ## Configuration
 
@@ -282,6 +282,16 @@ docker compose exec php composer test
 - `app/tests/Unit` — the notification handler (channel selection, one failing channel does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
 - `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, operation log and e-mail for each product change, no side effects on validation errors, rollback when the log cannot be written, a successful response when a channel fails.
 
+## Code quality
+
+```bash
+docker compose exec php composer stan   # PHPStan, level 8 (make stan)
+docker compose exec php composer cs     # PHP-CS-Fixer, @Symfony rules, dry run (make cs)
+make qa                                 # PHPStan + style check + tests
+```
+
+PHPStan uses the Symfony, Doctrine and PHPUnit extensions and reads the test container, so service types in tests are known. `composer cs-fix` (`make cs-fix`) applies the style fixes.
+
 ## Database access
 
 ```bash
@@ -300,6 +310,7 @@ docker compose --profile tools down
 ```
 .
 ├── Dockerfile                 PHP 8.4-FPM image
+├── Makefile                   Short aliases for Docker Compose commands
 ├── compose.yaml               php, nginx, database (MySQL 8.4), mailer (Mailpit), adminer (optional)
 ├── docker/                    nginx and MySQL configuration
 └── app/                       Symfony application

@@ -1,0 +1,11 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    symfony:
+        # The test container also knows the doubles in config/services_test.yaml.
+        containerXmlPath: var/cache/test/App_KernelTestDebugContainer.xml
+    doctrine:
+        # Entity fields stay nullable until set; validation rejects null before flush.
+        allowNullablePropertyForRequiredField: true
