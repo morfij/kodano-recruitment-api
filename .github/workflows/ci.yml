@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # The PHP container runs as the given user so it can write vendor/ and var/ into the checkout.
+      - name: Start containers
+        run: env UID="$(id -u)" GID="$(id -g)" docker compose up -d --build --wait
+
+      - name: Install dependencies
+        run: docker compose exec -T php composer install --no-interaction --no-progress
+
+      - name: PHPStan
+        run: docker compose exec -T php composer stan
+
+      - name: Coding style
+        run: docker compose exec -T php composer cs
+
+      - name: Tests
+        run: docker compose exec -T php composer test

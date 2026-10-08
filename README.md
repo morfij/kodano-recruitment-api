@@ -305,6 +305,8 @@ make qa                                 # PHPStan + style check + tests
 
 PHPStan uses the Symfony, Doctrine and PHPUnit extensions and reads the test container, so service types in tests are known. `composer cs-fix` (`make cs-fix`) applies the style fixes.
 
+GitHub Actions (`.github/workflows/ci.yml`) runs the same three checks in the same Docker setup on every push to `main` and on pull requests.
+
 ## Database access
 
 ```bash
@@ -324,6 +326,7 @@ docker compose --profile tools down
 .
 ├── Dockerfile                 PHP 8.4-FPM image
 ├── Makefile                   Short aliases for Docker Compose commands
+├── .github/workflows/ci.yml   PHPStan, coding style and tests on GitHub Actions
 ├── compose.yaml               php, nginx, database (MySQL 8.4), mailer (Mailpit), adminer (optional)
 ├── docker/                    nginx and MySQL configuration
 └── app/                       Symfony application
