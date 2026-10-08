@@ -5,9 +5,14 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use ApiPlatform\Metadata\ApiResource;
+use ApiPlatform\Metadata\Delete;
 use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
+use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Post;
+use ApiPlatform\OpenApi\Model\Operation as OpenApiOperation;
+use ApiPlatform\OpenApi\Model\Response as OpenApiResponse;
+use App\State\CategoryDeleteProcessor;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
 use Symfony\Component\Serializer\Attribute\Groups;
@@ -16,9 +21,19 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
 #[UniqueEntity('code')]
-// No PATCH / DELETE: removing a category in use would leave products without one.
 #[ApiResource(
-    operations: [new GetCollection(), new Get(), new Post()],
+    operations: [
+        new GetCollection(),
+        new Get(),
+        new Post(),
+        new Patch(),
+        new Delete(
+            processor: CategoryDeleteProcessor::class,
+            openapi: new OpenApiOperation(responses: [
+                '409' => new OpenApiResponse('The category is used by at least one product'),
+            ]),
+        ),
+    ],
     normalizationContext: ['groups' => ['category:read']],
     denormalizationContext: ['groups' => ['category:write']],
     order: ['id' => 'ASC'],

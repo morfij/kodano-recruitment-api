@@ -73,25 +73,11 @@ final class CategoryApiTest extends ApiTestCase
         self::assertJsonContains(['violations' => [['propertyPath' => 'code']]]);
     }
 
-    /**
-     * @return iterable<array{string}>
-     */
-    public static function closedMethods(): iterable
-    {
-        yield ['PATCH'];
-        yield ['PUT'];
-        yield ['DELETE'];
-    }
-
-    #[DataProvider('closedMethods')]
-    public function testCategoryCannotBeChangedOrDeleted(string $method): void
+    public function testPutIsNotAvailable(): void
     {
         $iri = $this->createCategory('MUGS');
 
-        $this->client->request($method, $iri, [
-            'json' => ['code' => 'CUPS'],
-            'headers' => ['Content-Type' => 'PATCH' === $method ? 'application/merge-patch+json' : 'application/ld+json'],
-        ]);
+        $this->client->request('PUT', $iri, ['json' => ['code' => 'CUPS']]);
 
         self::assertResponseStatusCodeSame(405);
     }

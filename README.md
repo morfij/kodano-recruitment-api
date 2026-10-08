@@ -75,6 +75,8 @@ Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/j
 | `GET` | `/api/categories` | List categories |
 | `GET` | `/api/categories/{id}` | Get one category |
 | `POST` | `/api/categories` | Create a category |
+| `PATCH` | `/api/categories/{id}` | Change the category code (`application/merge-patch+json`) |
+| `DELETE` | `/api/categories/{id}` | Delete a category that no product uses |
 | `GET` | `/api/operation_logs` | List operation log entries, newest first |
 | `GET` | `/api/operation_logs/{id}` | Get one log entry |
 
@@ -97,9 +99,9 @@ curl -s -g 'http://localhost:8080/api/operation_logs?createdAt[after]=2026-10-01
 
 An unknown `operation` or a non-integer `productId` returns `422`; a date that cannot be parsed is ignored.
 
-Categories cannot be changed or deleted through the API, so a product can never be left without a category. The database enforces the same rule: a category that is still linked to a product cannot be deleted.
+A category that is still linked to a product cannot be deleted: the API returns `409` and nothing changes, so a product is never left without a category. Move the products to other categories first. The database enforces the same rule with a `RESTRICT` foreign key. Changing or deleting a category is not a product change, so it produces no log entry or e-mail; earlier log entries keep the category codes valid at the time of the product change.
 
-Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
@@ -334,7 +336,7 @@ docker compose --profile tools down
     │   ├── Message/           ProductNotification
     │   ├── MessageHandler/    SendProductNotificationHandler
     │   ├── Notification/      NotificationChannelInterface, EmailNotificationChannel
-    │   └── State/             ProductStateProcessor
+    │   └── State/             ProductStateProcessor, CategoryDeleteProcessor
     ├── templates/email/
     └── tests/
 ```
@@ -346,7 +348,7 @@ docker compose --profile tools down
 - **Messenger with the sync transport.** It keeps the notification code ready for a queue without running a worker for a task that allows a fake e-mail.
 - **Deletion is a product change too.** It is logged and announced; category changes are not.
 - **Price as `DECIMAL(10,2)` exposed as a string.** No floating-point rounding; a single field is enough because currencies and price history are not part of the task (the log already keeps every price that was saved).
-- **Categories are read-only after creation.** Deleting a category in use would break the "at least one category" rule; the schema enforces it as well.
+- **A category in use cannot be deleted.** Deleting it would break the "at least one category" rule, so the API answers `409` and the schema has a `RESTRICT` foreign key as a second guard.
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
 - **No authentication.** It is not required here; it would be the next step before exposing the API.
