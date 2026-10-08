@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Enum\ProductOperation;
+use App\Message\ProductNotification;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
@@ -45,6 +46,15 @@ class OperationLog
         $this->productId = $productId;
         $this->payload = $payload;
         $this->createdAt = new \DateTimeImmutable();
+    }
+
+    public static function fromNotification(ProductNotification $notification): self
+    {
+        return new self($notification->operation, $notification->productId, [
+            'name' => $notification->name,
+            'price' => $notification->price,
+            'categories' => $notification->categoryCodes,
+        ]);
     }
 
     public function getId(): ?int

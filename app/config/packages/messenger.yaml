@@ -10,8 +10,8 @@ framework:
             sync: 'sync://'
 
         routing:
-            # Route your messages to the transports
-            # 'App\Message\YourMessage': async
+            # Handled in the request; switching to async also needs retry/failure handling.
+            'App\Message\ProductNotification': sync
 
 # when@test:
 #    framework:

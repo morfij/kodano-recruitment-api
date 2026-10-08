@@ -1,0 +1,7 @@
+Product {{ notification.operation.value }}
+
+ID:         {{ notification.productId }}
+Name:       {{ notification.name }}
+Price:      {{ notification.price }}
+Categories: {{ notification.categoryCodes|join(', ') }}
+Time:       {{ notification.occurredAt|date('Y-m-d H:i:s T') }}

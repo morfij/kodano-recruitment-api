@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Product {{ notification.operation.value }}</title>
+</head>
+<body>
+    <h1>Product {{ notification.operation.value }}</h1>
+    <table>
+        <tr><th align="left">ID</th><td>{{ notification.productId }}</td></tr>
+        <tr><th align="left">Name</th><td>{{ notification.name }}</td></tr>
+        <tr><th align="left">Price</th><td>{{ notification.price }}</td></tr>
+        <tr><th align="left">Categories</th><td>{{ notification.categoryCodes|join(', ') }}</td></tr>
+        <tr><th align="left">Time</th><td>{{ notification.occurredAt|date('Y-m-d H:i:s T') }}</td></tr>
+    </table>
+</body>
+</html>
