@@ -75,6 +75,8 @@ Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/j
 | `GET` | `/api/categories` | List categories |
 | `GET` | `/api/categories/{id}` | Get one category |
 | `POST` | `/api/categories` | Create a category |
+| `GET` | `/api/operation_logs` | List operation log entries, newest first |
+| `GET` | `/api/operation_logs/{id}` | Get one log entry |
 
 Fields:
 
@@ -84,6 +86,16 @@ Fields:
 - **Price** is a string with a dot as decimal separator, up to 8 digits before it and 2 after it (`"19.99"`, `"5"`, `"0.5"`). It is stored as `DECIMAL(10,2)` and returned with two decimals (`"5"` becomes `"5.00"`). A number instead of a string, a comma, a minus sign or a third decimal is rejected.
 
 `PATCH` follows JSON Merge Patch: omitted fields stay unchanged, `categories` replaces the whole list, and `null` for `name` / `price` or an empty `categories` list is a validation error.
+
+The operation log is read-only (`POST` / `PATCH` / `DELETE` return `405`). Each entry has `operation`, `productId` (a number, since the product may already be gone), `payload` and `createdAt`. The list can be filtered, and filters can be combined:
+
+```bash
+curl -s 'http://localhost:8080/api/operation_logs?productId=1'
+curl -s 'http://localhost:8080/api/operation_logs?operation=deleted'
+curl -s -g 'http://localhost:8080/api/operation_logs?createdAt[after]=2026-10-01&createdAt[before]=2026-10-31'
+```
+
+An unknown `operation` or a non-integer `productId` returns `422`; a date that cannot be parsed is ignored.
 
 Categories cannot be changed or deleted through the API, so a product can never be left without a category. The database enforces the same rule: a category that is still linked to a product cannot be deleted.
 
@@ -169,8 +181,7 @@ returns `422` with one entry in `violations` for `price` and one for `categories
 After these calls Mailpit shows one e-mail per product change, and the operation log holds the same events:
 
 ```bash
-docker compose exec database mysql -uapp -papp app \
-  -e 'SELECT operation, product_id, payload, created_at FROM operation_log'
+curl -s http://localhost:8080/api/operation_logs
 ```
 
 ## Operation log and notifications
@@ -330,7 +341,7 @@ docker compose --profile tools down
 
 ## Design decisions
 
-- **Operation log in the database, in the same transaction as the change.** A log entry exists exactly when the change exists, and the table can be queried and filtered later. Technical errors go to the regular application log.
+- **Operation log in the database, in the same transaction as the change.** A log entry exists exactly when the change exists. It can be read and filtered through a read-only endpoint or queried with SQL. Technical errors go to the regular application log.
 - **Own channel interface instead of using Symfony Notifier directly.** E-mail, Slack and SMS are all "channels" behind one small interface; Notifier is used inside a channel where it helps (Slack, SMS). The operation log is not a channel, because it must not fail independently of the change.
 - **Messenger with the sync transport.** It keeps the notification code ready for a queue without running a worker for a task that allows a fake e-mail.
 - **Deletion is a product change too.** It is logged and announced; category changes are not.
