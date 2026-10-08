@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
+#[UniqueEntity('code')]
 class Category
 {
     use TimestampableTrait;
@@ -18,6 +21,8 @@ class Category
     private ?int $id = null;
 
     #[ORM\Column(length: 10, unique: true)]
+    #[Assert\NotBlank(normalizer: 'trim')]
+    #[Assert\Length(max: 10)]
     private ?string $code = null;
 
     public function getId(): ?int
@@ -30,7 +35,7 @@ class Category
         return $this->code;
     }
 
-    public function setCode(string $code): static
+    public function setCode(?string $code): static
     {
         $this->code = $code;
 

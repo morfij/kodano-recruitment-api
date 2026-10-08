@@ -8,6 +8,7 @@ use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
+use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
@@ -21,10 +22,20 @@ class Product
     private ?int $id = null;
 
     #[ORM\Column(length: 255)]
+    #[Assert\NotBlank(normalizer: 'trim')]
+    #[Assert\Length(max: 255)]
     private ?string $name = null;
 
-    /** Decimal kept as a string to avoid float rounding. */
+    /**
+     * Decimal kept as a string to avoid float rounding. The pattern also bounds the
+     * range to 0..99999999.99, matching DECIMAL(10,2).
+     */
     #[ORM\Column(type: Types::DECIMAL, precision: 10, scale: 2)]
+    #[Assert\NotBlank]
+    #[Assert\Regex(
+        pattern: '/^\d{1,8}(\.\d{1,2})?$/D',
+        message: 'Price must be a decimal string with up to 8 digits before the point and up to 2 after it, e.g. "19.99".',
+    )]
     private ?string $price = null;
 
     /**
@@ -36,6 +47,7 @@ class Product
     #[ORM\JoinTable(name: 'product_category')]
     #[ORM\JoinColumn(onDelete: 'CASCADE')]
     #[ORM\InverseJoinColumn(onDelete: 'RESTRICT')]
+    #[Assert\Count(min: 1)]
     private Collection $categories;
 
     public function __construct()
@@ -53,7 +65,7 @@ class Product
         return $this->name;
     }
 
-    public function setName(string $name): static
+    public function setName(?string $name): static
     {
         $this->name = $name;
 
@@ -65,7 +77,7 @@ class Product
         return $this->price;
     }
 
-    public function setPrice(string $price): static
+    public function setPrice(?string $price): static
     {
         $this->price = $price;
 
