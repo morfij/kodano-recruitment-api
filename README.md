@@ -26,6 +26,14 @@ docker compose exec php bin/console doctrine:migrations:migrate -n
 | Swagger UI / OpenAPI | http://localhost:8080/api/docs |
 | Mailpit (sent e-mails) | http://localhost:8025 |
 
+Optionally load demo data (4 categories, 8 products):
+
+```bash
+docker compose exec php bin/console doctrine:fixtures:load -n
+```
+
+This empties the database first, including the operation log. Demo data is written through Doctrine, not the API, so it produces no log entries and no e-mails. The command is available only with dev dependencies installed.
+
 All further commands are run from the repository root.
 
 ## Configuration
@@ -298,6 +306,7 @@ docker compose --profile tools down
     ├── config/
     ├── migrations/
     ├── src/
+    │   ├── DataFixtures/      AppFixtures (demo data)
     │   ├── Entity/            Product, Category, OperationLog, TimestampableTrait
     │   ├── Enum/              ProductOperation
     │   ├── Message/           ProductNotification
