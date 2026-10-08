@@ -6,6 +6,7 @@ namespace App\Tests\Functional;
 
 use ApiPlatform\Test\ApiTestCase;
 use ApiPlatform\Test\Client;
+use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 final class ProductApiTest extends ApiTestCase
@@ -170,6 +171,40 @@ final class ProductApiTest extends ApiTestCase
         self::assertJsonContains(['name' => 'Kubek', 'price' => '19.99']);
     }
 
+    public function testPatchOfPriceOnlyUpdatesUpdatedAt(): void
+    {
+        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $before = $this->backdateTimestamps($iri);
+
+        $this->patch($iri, ['price' => '24.99']);
+        self::assertResponseIsSuccessful();
+
+        $this->assertTimestampsAfterUpdate($iri, $before);
+    }
+
+    public function testPatchOfCategoriesOnlyUpdatesUpdatedAt(): void
+    {
+        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $cups = $this->createCategory('CUPS');
+        $before = $this->backdateTimestamps($iri);
+
+        $this->patch($iri, ['categories' => [$cups]]);
+        self::assertResponseIsSuccessful();
+
+        $this->assertTimestampsAfterUpdate($iri, $before);
+    }
+
+    public function testPatchWithoutChangesStillUpdatesUpdatedAt(): void
+    {
+        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $before = $this->backdateTimestamps($iri);
+
+        $this->patch($iri, ['name' => 'Kubek']);
+        self::assertResponseIsSuccessful();
+
+        $this->assertTimestampsAfterUpdate($iri, $before);
+    }
+
     public function testPatchRequiresMergePatchContentType(): void
     {
         $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
@@ -197,6 +232,38 @@ final class ProductApiTest extends ApiTestCase
 
         $this->client->request('GET', $iri);
         self::assertResponseStatusCodeSame(404);
+    }
+
+    /**
+     * DATETIME keeps whole seconds, so move the stored dates back instead of sleeping.
+     *
+     * @return array{created_at: string, updated_at: string}
+     */
+    private function backdateTimestamps(string $iri): array
+    {
+        $db = static::getContainer()->get(Connection::class);
+        $id = (int) basename($iri);
+        $db->executeStatement(
+            'UPDATE product SET created_at = created_at - INTERVAL 1 HOUR, updated_at = updated_at - INTERVAL 1 HOUR WHERE id = ?',
+            [$id],
+        );
+
+        return $db->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [$id]);
+    }
+
+    /**
+     * @param array{created_at: string, updated_at: string} $before
+     */
+    private function assertTimestampsAfterUpdate(string $iri, array $before): void
+    {
+        $stored = static::getContainer()->get(Connection::class)
+            ->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [(int) basename($iri)]);
+        self::assertSame($before['created_at'], $stored['created_at']);
+        self::assertGreaterThan($before['updated_at'], $stored['updated_at']);
+
+        $read = $this->client->request('GET', $iri)->toArray();
+        self::assertEquals(new \DateTimeImmutable($before['created_at']), new \DateTimeImmutable($read['createdAt']));
+        self::assertGreaterThan(new \DateTimeImmutable($before['updated_at']), new \DateTimeImmutable($read['updatedAt']));
     }
 
     private function createCategory(string $code): string
