@@ -26,6 +26,9 @@ final class EmailNotificationChannelTest extends TestCase
         self::assertTrue($channel->supports($this->notification(ProductOperation::Deleted)));
     }
 
+    /**
+     * @return iterable<string, array{ProductOperation, string}>
+     */
     public static function operations(): iterable
     {
         yield 'created' => [ProductOperation::Created, 'Product created: Kubek (#12)'];

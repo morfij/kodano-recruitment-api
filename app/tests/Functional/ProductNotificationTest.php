@@ -9,6 +9,7 @@ use ApiPlatform\Test\Client;
 use App\Tests\Support\FailingNotificationChannel;
 use App\Tests\Support\FailingOperationLogListener;
 use Doctrine\DBAL\Connection;
+use Symfony\Component\Mime\RawMessage;
 
 final class ProductNotificationTest extends ApiTestCase
 {
@@ -37,7 +38,7 @@ final class ProductNotificationTest extends ApiTestCase
         self::assertSame([['created', $id, ['name' => 'Kubek', 'price' => '19.99', 'categories' => ['MUGS', 'CUPS']]]], $this->logEntries());
 
         self::assertEmailCount(1);
-        $email = self::getMailerMessage();
+        $email = $this->sentEmail();
         self::assertEmailHeaderSame($email, 'Subject', sprintf('Product created: Kubek (#%d)', $id));
         self::assertEmailAddressContains($email, 'From', 'noreply@example.com');
         self::assertEmailAddressContains($email, 'To', 'catalog@example.com');
@@ -56,7 +57,7 @@ final class ProductNotificationTest extends ApiTestCase
         self::assertResponseIsSuccessful();
         self::assertSame(['updated', $id, ['name' => 'Kubek XL', 'price' => '19.99', 'categories' => ['MUGS']]], $this->logEntries()[1]);
         self::assertEmailCount(1);
-        self::assertEmailHeaderSame(self::getMailerMessage(), 'Subject', sprintf('Product updated: Kubek XL (#%d)', $id));
+        self::assertEmailHeaderSame($this->sentEmail(), 'Subject', sprintf('Product updated: Kubek XL (#%d)', $id));
     }
 
     public function testDeleteWritesLogAndSendsEmail(): void
@@ -69,7 +70,7 @@ final class ProductNotificationTest extends ApiTestCase
         self::assertSame(0, $this->rowCount('product'));
         self::assertSame(['deleted', $id, ['name' => 'Kubek', 'price' => '19.99', 'categories' => ['MUGS']]], $this->logEntries()[1]);
         self::assertEmailCount(1);
-        $email = self::getMailerMessage();
+        $email = $this->sentEmail();
         self::assertEmailHeaderSame($email, 'Subject', sprintf('Product deleted: Kubek (#%d)', $id));
         self::assertEmailTextBodyContains($email, 'MUGS');
     }
@@ -131,6 +132,14 @@ final class ProductNotificationTest extends ApiTestCase
         self::assertEmailCount(1);
     }
 
+    private function sentEmail(): RawMessage
+    {
+        $email = self::getMailerMessage();
+        self::assertNotNull($email);
+
+        return $email;
+    }
+
     /**
      * @return list<array{string, int, array<string, mixed>}>
      */
@@ -176,6 +185,9 @@ final class ProductNotificationTest extends ApiTestCase
         return [$data['@id'], $data['id']];
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     private function patch(string $iri, array $data): void
     {
         $this->client->request('PATCH', $iri, [

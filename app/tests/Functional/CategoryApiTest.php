@@ -44,6 +44,9 @@ final class CategoryApiTest extends ApiTestCase
         self::assertSame(['MUGS', 'CUPS'], array_column($collection['member'], 'code'));
     }
 
+    /**
+     * @return iterable<string, array{string}>
+     */
     public static function invalidCodes(): iterable
     {
         yield 'too long' => ['ABCDEFGHIJK'];
@@ -70,6 +73,9 @@ final class CategoryApiTest extends ApiTestCase
         self::assertJsonContains(['violations' => [['propertyPath' => 'code']]]);
     }
 
+    /**
+     * @return iterable<array{string}>
+     */
     public static function closedMethods(): iterable
     {
         yield ['PATCH'];

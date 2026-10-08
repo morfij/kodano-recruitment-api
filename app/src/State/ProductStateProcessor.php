@@ -26,6 +26,10 @@ use Symfony\Component\Messenger\MessageBusInterface;
  */
 final class ProductStateProcessor implements ProcessorInterface
 {
+    /**
+     * @param ProcessorInterface<Product, Product> $persistProcessor
+     * @param ProcessorInterface<Product, null>    $removeProcessor
+     */
     public function __construct(
         #[Autowire(service: PersistProcessor::class)]
         private readonly ProcessorInterface $persistProcessor,

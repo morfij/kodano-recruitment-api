@@ -15,37 +15,37 @@ final class SendProductNotificationHandlerTest extends TestCase
 {
     public function testSendsToEverySupportingChannel(): void
     {
-        $sent = [];
+        $sent = $this->sentLog();
         $first = $this->recordingChannel('first', $sent);
         $second = $this->recordingChannel('second', $sent);
         $notification = $this->notification();
 
         $this->handler([$first, $second])($notification);
 
-        self::assertSame([['first', $notification], ['second', $notification]], $sent);
+        self::assertSame([['first', $notification], ['second', $notification]], $sent->getArrayCopy());
     }
 
     public function testSkipsChannelThatDoesNotSupportNotification(): void
     {
-        $sent = [];
+        $sent = $this->sentLog();
         $unsupported = $this->recordingChannel('unsupported', $sent, supports: false);
         $supported = $this->recordingChannel('supported', $sent);
 
         $this->handler([$unsupported, $supported])($this->notification());
 
-        self::assertSame(['supported'], array_column($sent, 0));
+        self::assertSame(['supported'], array_column($sent->getArrayCopy(), 0));
     }
 
     public function testFailingChannelDoesNotStopOthers(): void
     {
-        $sent = [];
+        $sent = $this->sentLog();
         $failing = $this->failingChannel(new \RuntimeException('SMTP is down'));
         $working = $this->recordingChannel('working', $sent);
         $logger = $this->createStub(LoggerInterface::class);
 
         (new SendProductNotificationHandler([$failing, $working], $logger))($this->notification());
 
-        self::assertSame(['working'], array_column($sent, 0));
+        self::assertSame(['working'], array_column($sent->getArrayCopy(), 0));
     }
 
     public function testLogsChannelFailure(): void
@@ -86,12 +86,23 @@ final class SendProductNotificationHandlerTest extends TestCase
     }
 
     /**
-     * @param list<array{string, ProductNotification}> $sent
+     * @return \ArrayObject<int, array{string, ProductNotification}>
      */
-    private function recordingChannel(string $name, array &$sent, bool $supports = true): NotificationChannelInterface
+    private function sentLog(): \ArrayObject
+    {
+        return new \ArrayObject();
+    }
+
+    /**
+     * @param \ArrayObject<int, array{string, ProductNotification}> $sent
+     */
+    private function recordingChannel(string $name, \ArrayObject $sent, bool $supports = true): NotificationChannelInterface
     {
         return new class($name, $sent, $supports) implements NotificationChannelInterface {
-            public function __construct(private string $name, private array &$sent, private bool $supports)
+            /**
+             * @param \ArrayObject<int, array{string, ProductNotification}> $sent
+             */
+            public function __construct(private string $name, private \ArrayObject $sent, private bool $supports)
             {
             }
 
@@ -102,7 +113,7 @@ final class SendProductNotificationHandlerTest extends TestCase
 
             public function send(ProductNotification $notification): void
             {
-                $this->sent[] = [$this->name, $notification];
+                $this->sent->append([$this->name, $notification]);
             }
         };
     }

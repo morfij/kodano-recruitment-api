@@ -89,6 +89,8 @@ final class ProductApiTest extends ApiTestCase
 
     /**
      * The response is read back from DECIMAL(10,2), so the price comes out with two decimals.
+     *
+     * @return iterable<array{string, string}>
      */
     public static function validPrices(): iterable
     {
@@ -107,6 +109,9 @@ final class ProductApiTest extends ApiTestCase
         self::assertJsonContains(['price' => $stored]);
     }
 
+    /**
+     * @return iterable<string, array{string|float}>
+     */
     public static function invalidPrices(): iterable
     {
         yield 'three decimals' => ['19.999'];
@@ -151,6 +156,9 @@ final class ProductApiTest extends ApiTestCase
         self::assertSame([$cups], $this->client->request('GET', $iri)->toArray()['categories']);
     }
 
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
     public static function invalidPatches(): iterable
     {
         yield 'null name' => [['name' => null], 'name'];
@@ -158,6 +166,9 @@ final class ProductApiTest extends ApiTestCase
         yield 'empty categories' => [['categories' => []], 'categories'];
     }
 
+    /**
+     * @param array<string, mixed> $patch
+     */
     #[DataProvider('invalidPatches')]
     public function testInvalidPatchIsRejected(array $patch, string $field): void
     {
@@ -241,14 +252,12 @@ final class ProductApiTest extends ApiTestCase
      */
     private function backdateTimestamps(string $iri): array
     {
-        $db = static::getContainer()->get(Connection::class);
-        $id = (int) basename($iri);
-        $db->executeStatement(
+        static::getContainer()->get(Connection::class)->executeStatement(
             'UPDATE product SET created_at = created_at - INTERVAL 1 HOUR, updated_at = updated_at - INTERVAL 1 HOUR WHERE id = ?',
-            [$id],
+            [(int) basename($iri)],
         );
 
-        return $db->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [$id]);
+        return $this->storedTimestamps($iri);
     }
 
     /**
@@ -256,14 +265,25 @@ final class ProductApiTest extends ApiTestCase
      */
     private function assertTimestampsAfterUpdate(string $iri, array $before): void
     {
-        $stored = static::getContainer()->get(Connection::class)
-            ->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [(int) basename($iri)]);
+        $stored = $this->storedTimestamps($iri);
         self::assertSame($before['created_at'], $stored['created_at']);
         self::assertGreaterThan($before['updated_at'], $stored['updated_at']);
 
         $read = $this->client->request('GET', $iri)->toArray();
         self::assertEquals(new \DateTimeImmutable($before['created_at']), new \DateTimeImmutable($read['createdAt']));
         self::assertGreaterThan(new \DateTimeImmutable($before['updated_at']), new \DateTimeImmutable($read['updatedAt']));
+    }
+
+    /**
+     * @return array{created_at: string, updated_at: string}
+     */
+    private function storedTimestamps(string $iri): array
+    {
+        $row = static::getContainer()->get(Connection::class)
+            ->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [(int) basename($iri)]);
+        self::assertIsArray($row);
+
+        return ['created_at' => (string) $row['created_at'], 'updated_at' => (string) $row['updated_at']];
     }
 
     private function createCategory(string $code): string
@@ -283,6 +303,9 @@ final class ProductApiTest extends ApiTestCase
         ]])->toArray()['@id'];
     }
 
+    /**
+     * @param array<string, mixed> $data
+     */
     private function patch(string $iri, array $data): void
     {
         $this->client->request('PATCH', $iri, [
