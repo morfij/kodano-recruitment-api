@@ -4,6 +4,10 @@ api_platform:
     formats:
         jsonld: ['application/ld+json']
         json: ['application/json']
+    swagger:
+        http_auth:
+            bearer:
+                scheme: bearer
     patch_formats:
         json: ['application/merge-patch+json']
     defaults:

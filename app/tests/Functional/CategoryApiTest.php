@@ -17,7 +17,7 @@ final class CategoryApiTest extends ApiTestCase
 
     protected function setUp(): void
     {
-        $this->client = static::createClient();
+        $this->client = static::createClient([], ['auth_bearer' => $_SERVER['API_TOKEN']]);
     }
 
     public function testCreate(): void

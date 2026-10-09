@@ -72,6 +72,7 @@
         },
         "post-install-cmd": [
             "@php -r \"str_contains((string) @file_get_contents('.env.local'), 'APP_SECRET=') || file_put_contents('.env.local', 'APP_SECRET='.bin2hex(random_bytes(16)).PHP_EOL, FILE_APPEND);\"",
+            "@php -r \"str_contains((string) @file_get_contents('.env.local'), 'API_TOKEN=') || file_put_contents('.env.local', 'API_TOKEN='.bin2hex(random_bytes(32)).PHP_EOL, FILE_APPEND);\"",
             "@auto-scripts"
         ],
         "post-update-cmd": [
