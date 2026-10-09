@@ -2,6 +2,9 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
+    # X-HTTP-Method-Override is honoured even without http_method_override; the API needs neither.
+    allowed_http_method_override: []
+
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 

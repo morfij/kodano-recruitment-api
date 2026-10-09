@@ -13,6 +13,7 @@ use ApiPlatform\Metadata\Post;
 use ApiPlatform\OpenApi\Model\Operation as OpenApiOperation;
 use ApiPlatform\OpenApi\Model\Response as OpenApiResponse;
 use App\State\CategoryDeleteProcessor;
+use App\State\CategoryPersistProcessor;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Validator\Constraints\UniqueEntity;
 use Symfony\Component\Serializer\Attribute\Groups;
@@ -25,8 +26,8 @@ use Symfony\Component\Validator\Constraints as Assert;
     operations: [
         new GetCollection(),
         new Get(),
-        new Post(),
-        new Patch(),
+        new Post(processor: CategoryPersistProcessor::class),
+        new Patch(processor: CategoryPersistProcessor::class),
         new Delete(
             processor: CategoryDeleteProcessor::class,
             openapi: new OpenApiOperation(responses: [

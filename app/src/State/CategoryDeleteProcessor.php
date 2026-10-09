@@ -9,6 +9,7 @@ use ApiPlatform\Metadata\Operation;
 use ApiPlatform\State\ProcessorInterface;
 use App\Entity\Category;
 use App\Entity\Product;
+use Doctrine\DBAL\Exception\ForeignKeyConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -42,6 +43,11 @@ final class CategoryDeleteProcessor implements ProcessorInterface
             throw new ConflictHttpException(sprintf('Category %s is used by %d product(s) and cannot be deleted.', $data->getCode(), $products));
         }
 
-        return $this->removeProcessor->process($data, $operation, $uriVariables, $context);
+        try {
+            return $this->removeProcessor->process($data, $operation, $uriVariables, $context);
+        } catch (ForeignKeyConstraintViolationException) {
+            // A product was linked after the check above.
+            throw new ConflictHttpException(sprintf('Category %s is used by a product and cannot be deleted.', $data->getCode()));
+        }
     }
 }

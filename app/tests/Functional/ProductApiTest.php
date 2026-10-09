@@ -234,6 +234,17 @@ final class ProductApiTest extends ApiTestCase
         self::assertResponseStatusCodeSame(405);
     }
 
+    public function testMethodOverrideHeaderIsIgnored(): void
+    {
+        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+
+        $this->client->request('POST', $iri, ['json' => [], 'headers' => ['X-HTTP-Method-Override' => 'DELETE']]);
+        self::assertResponseStatusCodeSame(405);
+
+        $this->client->request('GET', $iri);
+        self::assertResponseIsSuccessful();
+    }
+
     public function testDelete(): void
     {
         $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
