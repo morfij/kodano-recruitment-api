@@ -101,7 +101,9 @@ An unknown `operation` or a non-integer `productId` returns `422`; a date that c
 
 A category that is still linked to a product cannot be deleted: the API returns `409` and nothing changes, so a product is never left without a category. Move the products to other categories first. The database enforces the same rule with a `RESTRICT` foreign key. Changing or deleting a category is not a product change, so it produces no log entry or e-mail; earlier log entries keep the category codes valid at the time of the product change.
 
-Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Two `PATCH` requests for the same product that overlap in time do not overwrite each other: the second one is rejected with `409` and changes nothing, so it can be retried on the current state.
+
+Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
@@ -294,8 +296,8 @@ docker compose exec php composer test
 
 `composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent.
 
-- `app/tests/Unit` — the notification handler (channel selection, one failing channel does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback when the log cannot be written, a successful response when a channel fails, and the operation log endpoint with its filters.
+- `app/tests/Unit` — the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
+- `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
@@ -354,6 +356,7 @@ docker compose --profile tools down
 - **Deletion is a product change too.** It is logged and announced; category changes are not.
 - **Price as `DECIMAL(10,2)` exposed as a string.** No floating-point rounding; a single field is enough because currencies and price history are not part of the task (the log already keeps every price that was saved).
 - **A category in use cannot be deleted.** Deleting it would break the "at least one category" rule, so the API answers `409` and the schema has a `RESTRICT` foreign key as a second guard.
+- **Optimistic locking on products.** Each request validates its own category list, so two overlapping updates could still remove different categories and leave none. A Doctrine version column makes the later write fail with `409`; clients do not send the version, so the API stays plain `PATCH`.
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
 - **No authentication.** It is not required here; it would be the next step before exposing the API.

@@ -11,6 +11,8 @@ use ApiPlatform\Metadata\Get;
 use ApiPlatform\Metadata\GetCollection;
 use ApiPlatform\Metadata\Patch;
 use ApiPlatform\Metadata\Post;
+use ApiPlatform\OpenApi\Model\Operation as OpenApiOperation;
+use ApiPlatform\OpenApi\Model\Response as OpenApiResponse;
 use App\State\ProductStateProcessor;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
@@ -22,7 +24,15 @@ use Symfony\Component\Validator\Constraints as Assert;
 #[ORM\Entity]
 #[ORM\HasLifecycleCallbacks]
 #[ApiResource(
-    operations: [new GetCollection(), new Get(), new Post(), new Patch(), new Delete()],
+    operations: [
+        new GetCollection(),
+        new Get(),
+        new Post(),
+        new Patch(openapi: new OpenApiOperation(responses: [
+            '409' => new OpenApiResponse('The product was changed by another request in the meantime'),
+        ])),
+        new Delete(),
+    ],
     normalizationContext: ['groups' => ['product:read']],
     denormalizationContext: ['groups' => ['product:write']],
     order: ['id' => 'ASC'],
@@ -70,6 +80,15 @@ class Product
     #[Groups(['product:read', 'product:write'])]
     #[ApiProperty(readableLink: false, writableLink: false)]
     private Collection $categories;
+
+    /**
+     * Two PATCH requests that read the same categories could otherwise each remove a
+     * different one and leave none. The version is bumped on every update, because
+     * the processor touches updatedAt, so a stale write fails with 409.
+     */
+    #[ORM\Version]
+    #[ORM\Column(type: Types::INTEGER)]
+    private int $version = 1;
 
     public function __construct()
     {
