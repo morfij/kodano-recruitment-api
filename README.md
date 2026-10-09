@@ -60,6 +60,7 @@ There are two levels of settings.
 | `MAILER_TO` | `catalog@example.com` | Recipient of notification e-mails |
 | `API_TOKEN` | empty | Bearer token required by the API; empty rejects every request |
 | `API_WRITE_LIMIT` | `60` | `POST` / `PATCH` / `DELETE` requests per client IP and minute |
+| `LOCK_DSN` | `flock` | Lock store for the rate limiter; `flock` covers all PHP workers on one host |
 
 `APP_SECRET` and `API_TOKEN` are not stored in the repository. `composer install` writes random values to `app/.env.local` (ignored by Git) when they are missing there. In production all values come from real environment variables, which take precedence over `.env` files.
 
@@ -296,7 +297,10 @@ Notifications are handled synchronously, within the request. The message is alre
 
 - a transport (e.g. `doctrine://default` or RabbitMQ) and the route `App\Message\ProductNotification` pointed to it in `app/config/packages/messenger.yaml`;
 - a long-running worker (`bin/console messenger:consume async`) as an extra Compose service;
-- a retry policy and a failure transport, and a decision on duplicates, since a retried message can send an e-mail twice.
+- a retry policy and a failure transport, and a decision on duplicates, since a retried message can send an e-mail twice;
+- a handler that lets channel failures reach the worker (today it logs and swallows them, so nothing would be retried), and a way to retry only the channel that failed.
+
+The message is dispatched after the commit, so a process that dies in between keeps the change and its log entry but sends nothing. Guaranteed delivery needs the message stored in the same transaction as the change (an outbox) and a worker that sends it.
 
 The operation log is not affected: it stays in the same transaction as the product change.
 
@@ -308,8 +312,8 @@ docker compose exec php composer test
 
 `composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent. The tests generate their own random API token.
 
-- `app/tests/Unit` — the API token check, the write rate limit, the `409` when a category gets linked while it is being deleted, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a duplicate category code from a concurrent request reported as a normal violation, `X-HTTP-Method-Override` being ignored, a successful response when a channel fails, and the operation log endpoint with its filters.
+- `app/tests/Unit` — the API token check, the write rate limit rules, the `409` when a category gets linked while it is being deleted, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
+- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a duplicate category code from a concurrent request reported as a normal violation, `X-HTTP-Method-Override` being ignored, error responses without debug (no trace or SQL), the rate limit holding for parallel PHP processes, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
@@ -374,5 +378,15 @@ docker compose --profile tools down
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
 - **One shared bearer token.** The task does not define users or roles, so a single token from the environment protects the whole API with Symfony's built-in `access_token` authenticator and no extra packages. Per-client tokens or JWT can replace the token handler when the API gets real consumers.
-- **Write rate limit in the application.** Each write produces a log entry and an e-mail, so the limit sits next to the code that causes them. The state is kept in the Symfony cache; with several servers `cache_pool` in `rate_limiter.yaml` can point to a shared store such as Redis.
-- **Database errors never reach the client.** The UNIQUE index and the `RESTRICT` foreign key back up the validation in races; their errors are turned into the same `422` / `409` a sequential request gets.
+- **Write rate limit in the application.** Product writes produce a log entry and an e-mail, so the limit sits next to the code that causes them. The counter is kept in the Symfony cache and updated under a lock (`LOCK_DSN`), so parallel PHP workers cannot pass it together. With several servers both need a shared store, e.g. Redis for `cache_pool` in `rate_limiter.yaml` and for `LOCK_DSN`.
+- **Database constraints as the last guard for categories.** The UNIQUE index on `code` and the `RESTRICT` foreign key catch what validation misses in races; their errors are returned as the same `422` / `409` a sequential request gets, without SQL details. Other unexpected errors give `500`; with `APP_DEBUG=0` the response has no stack trace.
+
+## Limitations
+
+Deliberate simplifications for the size of this task, and what to change when they start to matter:
+
+- **Notifications are best effort.** They run synchronously after the commit, with no retry; see [Running notifications asynchronously](#running-notifications-asynchronously).
+- **Concurrency protection covers overlapping requests, not stale forms.** The product version is not exposed, so a client that edits an old copy overwrites newer data. An editing UI would need the version in the API or `ETag` / `If-Match`.
+- **Entities are the API contract.** ORM mapping, API metadata, validation and serialization groups live on the same classes. Separate DTO resources become worth it with distinct create/update commands, several API versions or different views of the data.
+- **Product rules live in `ProductStateProcessor`.** Code that saves a product directly through Doctrine (fixtures do it on purpose) gets no log entry, e-mail or `updatedAt` touch. An import or CLI command should share that flow through an application service.
+- **One client, one instance.** A single token means no per-client roles or revocation; the rate limit is per IP, so clients behind one NAT share it. The Docker setup is for development: production needs an image with the code and dependencies built in, read-only code, and migrations run as a deployment step.
