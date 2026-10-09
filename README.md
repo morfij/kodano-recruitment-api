@@ -63,7 +63,7 @@ There are two levels of settings.
 
 ## API
 
-Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/json`). Collections are paginated (30 items per page) and ordered by `id`.
+Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/json`). Collections are paginated (30 items per page) and ordered by `id`; the operation log lists the newest entries first.
 
 | Method | Path | Description |
 |---|---|---|
@@ -84,7 +84,7 @@ Fields:
 
 - **Product**: `id`, `name` (required, up to 255 characters), `price`, `categories` (at least one, as IRIs such as `"/api/categories/1"`), `createdAt`, `updatedAt`.
 - **Category**: `id`, `code` (required, unique, up to 10 characters), `createdAt`, `updatedAt`.
-- `id`, `createdAt` and `updatedAt` are read-only and set automatically. `updatedAt` changes on every successful `PATCH`.
+- `id`, `createdAt` and `updatedAt` are read-only and set automatically. A product's `updatedAt` changes on every successful `PATCH`, even when no value changed; a category's changes when its code does.
 - **Price** is a string with a dot as decimal separator, up to 8 digits before it and 2 after it (`"19.99"`, `"5"`, `"0.5"`). It is stored as `DECIMAL(10,2)` and returned with two decimals (`"5"` becomes `"5.00"`). A number instead of a string, a comma, a minus sign or a third decimal is rejected.
 
 `PATCH` follows JSON Merge Patch: omitted fields stay unchanged, `categories` replaces the whole list, and `null` for `name` / `price` or an empty `categories` list is a validation error.
@@ -104,6 +104,8 @@ A category that is still linked to a product cannot be deleted: the API returns 
 Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
+
+The examples start from an empty database, so skip the demo data or recreate the database first (`docker compose down -v`, then the Quick start commands).
 
 Create the first category:
 
@@ -293,7 +295,7 @@ docker compose exec php composer test
 `composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent.
 
 - `app/tests/Unit` — the notification handler (channel selection, one failing channel does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, operation log and e-mail for each product change, no side effects on validation errors, rollback when the log cannot be written, a successful response when a channel fails.
+- `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback when the log cannot be written, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
