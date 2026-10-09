@@ -4,28 +4,16 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
-use ApiPlatform\Test\ApiTestCase;
-use ApiPlatform\Test\Client;
-use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 final class CategoryApiTest extends ApiTestCase
 {
-    protected static ?bool $alwaysBootKernel = false;
-
-    private Client $client;
-
-    protected function setUp(): void
-    {
-        $this->client = static::createClient([], ['auth_bearer' => $_SERVER['API_TOKEN']]);
-    }
-
     public function testCreate(): void
     {
         $response = $this->client->request('POST', '/api/categories', ['json' => ['code' => 'MUGS']]);
 
         self::assertResponseStatusCodeSame(201);
-        self::assertJsonContains(['@type' => 'Category', 'code' => 'MUGS']);
+        self::assertJsonContains(['code' => 'MUGS']);
         $data = $response->toArray();
         self::assertNotEmpty($data['createdAt']);
         self::assertSame($data['createdAt'], $data['updatedAt']);
@@ -33,16 +21,16 @@ final class CategoryApiTest extends ApiTestCase
 
     public function testGetItemAndCollection(): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
         $this->createCategory('CUPS');
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseIsSuccessful();
-        self::assertJsonContains(['@id' => $iri, 'code' => 'MUGS']);
+        self::assertJsonContains(['id' => (int) basename($uri), 'code' => 'MUGS']);
 
         $collection = $this->client->request('GET', '/api/categories')->toArray();
         self::assertSame(2, $collection['totalItems']);
-        self::assertSame(['MUGS', 'CUPS'], array_column($collection['member'], 'code'));
+        self::assertSame(['MUGS', 'CUPS'], array_column($collection['items'], 'code'));
     }
 
     /**
@@ -76,20 +64,20 @@ final class CategoryApiTest extends ApiTestCase
 
     public function testUpdateCode(): void
     {
-        $iri = $this->createCategory('MUGS');
-        $createdAt = $this->client->request('GET', $iri)->toArray()['createdAt'];
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
+        $createdAt = $this->client->request('GET', $uri)->toArray()['createdAt'];
 
-        $this->patch($iri, ['code' => 'CUPS']);
+        $this->patch($uri, ['code' => 'CUPS']);
 
         self::assertResponseIsSuccessful();
-        self::assertJsonContains(['@id' => $iri, 'code' => 'CUPS', 'createdAt' => $createdAt]);
+        self::assertJsonContains(['id' => (int) basename($uri), 'code' => 'CUPS', 'createdAt' => $createdAt]);
     }
 
     public function testUpdateKeepsOwnCode(): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
 
-        $this->patch($iri, ['code' => 'MUGS']);
+        $this->patch($uri, ['code' => 'MUGS']);
 
         self::assertResponseIsSuccessful();
     }
@@ -108,41 +96,42 @@ final class CategoryApiTest extends ApiTestCase
     #[DataProvider('invalidUpdates')]
     public function testInvalidUpdateIsRejected(?string $code): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
         $this->createCategory('CUPS');
 
-        $this->patch($iri, ['code' => $code]);
+        $this->patch($uri, ['code' => $code]);
 
         self::assertResponseStatusCodeSame(422);
         self::assertJsonContains(['violations' => [['propertyPath' => 'code']]]);
-        self::assertSame('MUGS', $this->client->request('GET', $iri)->toArray()['code']);
+        self::assertSame('MUGS', $this->client->request('GET', $uri)->toArray()['code']);
     }
 
     public function testDeleteUnusedCategory(): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
 
-        $this->client->request('DELETE', $iri);
+        $this->client->request('DELETE', $uri);
         self::assertResponseStatusCodeSame(204);
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseStatusCodeSame(404);
     }
 
     public function testDeleteUsedCategoryIsRejected(): void
     {
-        $iri = $this->createCategory('MUGS');
-        $product = $this->createProduct([$iri]);
+        $mugs = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$mugs;
+        $product = '/api/products/'.$this->createProduct('Kubek', '19.99', [$mugs]);
         $logEntries = $this->logEntryCount();
 
-        $this->client->request('DELETE', $iri);
+        $this->client->request('DELETE', $uri);
 
         self::assertResponseStatusCodeSame(409);
         self::assertJsonContains(['detail' => 'Category MUGS is used by 1 product(s) and cannot be deleted.']);
         self::assertEmailCount(0);
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseIsSuccessful();
-        self::assertSame([$iri], $this->client->request('GET', $product)->toArray()['categories']);
+        self::assertSame([$mugs], $this->client->request('GET', $product)->toArray()['categories']);
         self::assertSame($logEntries, $this->logEntryCount());
     }
 
@@ -150,24 +139,21 @@ final class CategoryApiTest extends ApiTestCase
     {
         $mugs = $this->createCategory('MUGS');
         $cups = $this->createCategory('CUPS');
-        $product = $this->createProduct([$mugs]);
+        $product = $this->createProduct('Kubek', '19.99', [$mugs]);
 
-        $this->client->request('PATCH', $product, [
-            'json' => ['categories' => [$cups]],
-            'headers' => ['Content-Type' => 'application/merge-patch+json'],
-        ]);
-        $this->client->request('DELETE', $mugs);
+        $this->patch('/api/products/'.$product, ['categories' => [$cups]]);
+        $this->client->request('DELETE', '/api/categories/'.$mugs);
 
         self::assertResponseStatusCodeSame(204);
     }
 
     public function testCategoryChangesSendNoNotifications(): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
 
-        $this->patch($iri, ['code' => 'CUPS']);
+        $this->patch($uri, ['code' => 'CUPS']);
         self::assertEmailCount(0);
-        $this->client->request('DELETE', $iri);
+        $this->client->request('DELETE', $uri);
         self::assertEmailCount(0);
 
         self::assertSame(0, $this->logEntryCount());
@@ -175,43 +161,15 @@ final class CategoryApiTest extends ApiTestCase
 
     public function testPutIsNotAvailable(): void
     {
-        $iri = $this->createCategory('MUGS');
+        $uri = '/api/categories/'.$this->createCategory('MUGS');
 
-        $this->client->request('PUT', $iri, ['json' => ['code' => 'CUPS']]);
+        $this->client->request('PUT', $uri, ['json' => ['code' => 'CUPS']]);
 
         self::assertResponseStatusCodeSame(405);
     }
 
-    /**
-     * @param list<string> $categories
-     */
-    private function createProduct(array $categories): string
-    {
-        return $this->client->request('POST', '/api/products', ['json' => [
-            'name' => 'Kubek',
-            'price' => '19.99',
-            'categories' => $categories,
-        ]])->toArray()['@id'];
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function patch(string $iri, array $data): void
-    {
-        $this->client->request('PATCH', $iri, [
-            'json' => $data,
-            'headers' => ['Content-Type' => 'application/merge-patch+json'],
-        ]);
-    }
-
     private function logEntryCount(): int
     {
-        return (int) static::getContainer()->get(Connection::class)->fetchOne('SELECT COUNT(*) FROM operation_log');
-    }
-
-    private function createCategory(string $code): string
-    {
-        return $this->client->request('POST', '/api/categories', ['json' => ['code' => $code]])->toArray()['@id'];
+        return (int) $this->db()->fetchOne('SELECT COUNT(*) FROM operation_log');
     }
 }

@@ -2,8 +2,12 @@ api_platform:
     title: Kodano Product API
     version: 1.0.0
     formats:
-        jsonld: ['application/ld+json']
         json: ['application/json']
+    error_formats:
+        jsonproblem: ['application/problem+json']
+    docs_formats:
+        jsonopenapi: ['application/vnd.openapi+json']
+        html: ['text/html']
     swagger:
         http_auth:
             bearer:

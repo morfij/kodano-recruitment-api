@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
-use ApiPlatform\Test\ApiTestCase;
-use ApiPlatform\Test\Client;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
@@ -14,15 +12,11 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  */
 final class ErrorResponseTest extends ApiTestCase
 {
-    protected static ?bool $alwaysBootKernel = false;
-
-    private Client $client;
-
     protected function setUp(): void
     {
         // createClient() ignores kernel options unless $alwaysBootKernel is set.
         static::bootKernel(['debug' => false]);
-        $this->client = static::createClient([], ['auth_bearer' => $_SERVER['API_TOKEN']]);
+        parent::setUp();
     }
 
     public function testNotFound(): void
@@ -34,29 +28,29 @@ final class ErrorResponseTest extends ApiTestCase
     {
         $response = $this->client->request('POST', '/api/products', [
             'body' => '{"name":',
-            'headers' => ['Content-Type' => 'application/ld+json'],
+            'headers' => ['Content-Type' => 'application/json'],
         ]);
 
         $this->assertCleanError($response, 400);
     }
 
-    public function testUnknownCategoryIri(): void
+    public function testUnknownCategory(): void
     {
         $response = $this->client->request('POST', '/api/products', ['json' => [
             'name' => 'Kubek',
             'price' => '19.99',
-            'categories' => ['/api/categories/999999'],
+            'categories' => [999999],
         ]]);
 
-        $this->assertCleanError($response, 400);
+        $this->assertCleanError($response, 422);
     }
 
     public function testCategoryInUse(): void
     {
-        $category = $this->client->request('POST', '/api/categories', ['json' => ['code' => 'MUGS']])->toArray()['@id'];
-        $this->client->request('POST', '/api/products', ['json' => ['name' => 'Kubek', 'price' => '19.99', 'categories' => [$category]]]);
+        $category = $this->createCategory('MUGS');
+        $this->createProduct('Kubek', '19.99', [$category]);
 
-        $this->assertCleanError($this->client->request('DELETE', $category), 409);
+        $this->assertCleanError($this->client->request('DELETE', '/api/categories/'.$category), 409);
     }
 
     public function testDuplicateCategoryCodeKeepsTheViolation(): void

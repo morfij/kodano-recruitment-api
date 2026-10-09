@@ -4,22 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
-use ApiPlatform\Test\ApiTestCase;
-use ApiPlatform\Test\Client;
-use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 final class ProductApiTest extends ApiTestCase
 {
-    protected static ?bool $alwaysBootKernel = false;
-
-    private Client $client;
-
-    protected function setUp(): void
-    {
-        $this->client = static::createClient([], ['auth_bearer' => $_SERVER['API_TOKEN']]);
-    }
-
     public function testCreate(): void
     {
         $category = $this->createCategory('MUGS');
@@ -32,7 +20,6 @@ final class ProductApiTest extends ApiTestCase
 
         self::assertResponseStatusCodeSame(201);
         self::assertJsonContains([
-            '@type' => 'Product',
             'name' => 'Kubek',
             'price' => '19.99',
             'categories' => [$category],
@@ -45,28 +32,16 @@ final class ProductApiTest extends ApiTestCase
     public function testGetItemAndCollection(): void
     {
         $category = $this->createCategory('MUGS');
-        $iri = $this->createProduct('Kubek', '19.99', [$category]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$category]);
         $this->createProduct('Talerz', '7.50', [$category]);
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseIsSuccessful();
-        self::assertJsonContains(['@id' => $iri, 'name' => 'Kubek', 'categories' => [$category]]);
+        self::assertJsonContains(['id' => (int) basename($uri), 'name' => 'Kubek', 'categories' => [$category]]);
 
         $collection = $this->client->request('GET', '/api/products')->toArray();
         self::assertSame(2, $collection['totalItems']);
-        self::assertSame(['Kubek', 'Talerz'], array_column($collection['member'], 'name'));
-    }
-
-    public function testPlainJsonFormat(): void
-    {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
-
-        $response = $this->client->request('GET', $iri, ['headers' => ['Accept' => 'application/json']]);
-
-        self::assertResponseHeaderSame('content-type', 'application/json');
-        $data = $response->toArray();
-        self::assertArrayNotHasKey('@context', $data);
-        self::assertSame('Kubek', $data['name']);
+        self::assertSame(['Kubek', 'Talerz'], array_column($collection['items'], 'name'));
     }
 
     public function testUnknownProductReturns404(): void
@@ -136,9 +111,9 @@ final class ProductApiTest extends ApiTestCase
     public function testPatchChangesOnlyGivenFields(): void
     {
         $category = $this->createCategory('MUGS');
-        $iri = $this->createProduct('Kubek', '19.99', [$category]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$category]);
 
-        $this->patch($iri, ['name' => 'Kubek XL']);
+        $this->patch($uri, ['name' => 'Kubek XL']);
 
         self::assertResponseIsSuccessful();
         self::assertJsonContains(['name' => 'Kubek XL', 'price' => '19.99', 'categories' => [$category]]);
@@ -148,12 +123,62 @@ final class ProductApiTest extends ApiTestCase
     {
         $mugs = $this->createCategory('MUGS');
         $cups = $this->createCategory('CUPS');
-        $iri = $this->createProduct('Kubek', '19.99', [$mugs]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$mugs]);
 
-        $this->patch($iri, ['categories' => [$cups]]);
+        $this->patch($uri, ['categories' => [$cups]]);
 
         self::assertResponseIsSuccessful();
-        self::assertSame([$cups], $this->client->request('GET', $iri)->toArray()['categories']);
+        self::assertSame([$cups], $this->client->request('GET', $uri)->toArray()['categories']);
+    }
+
+    public function testDuplicateCategoryIdsAreStoredOnce(): void
+    {
+        $mugs = $this->createCategory('MUGS');
+        $cups = $this->createCategory('CUPS');
+
+        $id = $this->createProduct('Kubek', '19.99', [$mugs, $cups, $mugs]);
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertJsonContains(['categories' => [$mugs, $cups]]);
+        self::assertSame(2, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM product_category WHERE product_id = ?', [$id]));
+    }
+
+    public function testPatchWithoutCategoriesKeepsThem(): void
+    {
+        $mugs = $this->createCategory('MUGS');
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$mugs]);
+
+        $this->patch($uri, ['price' => '24.99']);
+
+        self::assertResponseIsSuccessful();
+        self::assertJsonContains(['price' => '24.99', 'categories' => [$mugs]]);
+    }
+
+    /**
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidCategoryLists(): iterable
+    {
+        yield 'unknown ID' => [[999999], 'Category 999999 does not exist.'];
+        yield 'IRI' => [['/api/categories/1'], 'This value should be a list of category IDs.'];
+        yield 'numeric string' => [['1'], 'This value should be a list of category IDs.'];
+        yield 'nested list' => [[[1]], 'This value should be a list of category IDs.'];
+        yield 'object' => [['a' => 1], 'This value should be a list of category IDs.'];
+        yield 'single ID' => [1, 'This value should be a list of category IDs.'];
+        yield 'null' => [null, 'This collection should contain 1 element or more.'];
+    }
+
+    #[DataProvider('invalidCategoryLists')]
+    public function testInvalidCategoryListIsRejected(mixed $categories, string $message): void
+    {
+        $mugs = $this->createCategory('MUGS');
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$mugs]);
+
+        $this->patch($uri, ['categories' => $categories]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertJsonContains(['violations' => [['propertyPath' => 'categories', 'message' => $message]]]);
+        self::assertSame([$mugs], $this->client->request('GET', $uri)->toArray()['categories']);
     }
 
     /**
@@ -172,87 +197,87 @@ final class ProductApiTest extends ApiTestCase
     #[DataProvider('invalidPatches')]
     public function testInvalidPatchIsRejected(array $patch, string $field): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->patch($iri, $patch);
+        $this->patch($uri, $patch);
 
         self::assertResponseStatusCodeSame(422);
         self::assertJsonContains(['violations' => [['propertyPath' => $field]]]);
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertJsonContains(['name' => 'Kubek', 'price' => '19.99']);
     }
 
     public function testPatchOfPriceOnlyUpdatesUpdatedAt(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
-        $before = $this->backdateTimestamps($iri);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $before = $this->backdateTimestamps($uri);
 
-        $this->patch($iri, ['price' => '24.99']);
+        $this->patch($uri, ['price' => '24.99']);
         self::assertResponseIsSuccessful();
 
-        $this->assertTimestampsAfterUpdate($iri, $before);
+        $this->assertTimestampsAfterUpdate($uri, $before);
     }
 
     public function testPatchOfCategoriesOnlyUpdatesUpdatedAt(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
         $cups = $this->createCategory('CUPS');
-        $before = $this->backdateTimestamps($iri);
+        $before = $this->backdateTimestamps($uri);
 
-        $this->patch($iri, ['categories' => [$cups]]);
+        $this->patch($uri, ['categories' => [$cups]]);
         self::assertResponseIsSuccessful();
 
-        $this->assertTimestampsAfterUpdate($iri, $before);
+        $this->assertTimestampsAfterUpdate($uri, $before);
     }
 
     public function testPatchWithoutChangesStillUpdatesUpdatedAt(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
-        $before = $this->backdateTimestamps($iri);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $before = $this->backdateTimestamps($uri);
 
-        $this->patch($iri, ['name' => 'Kubek']);
+        $this->patch($uri, ['name' => 'Kubek']);
         self::assertResponseIsSuccessful();
 
-        $this->assertTimestampsAfterUpdate($iri, $before);
+        $this->assertTimestampsAfterUpdate($uri, $before);
     }
 
     public function testPatchRequiresMergePatchContentType(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->client->request('PATCH', $iri, ['json' => ['name' => 'Kubek XL'], 'headers' => ['Content-Type' => 'application/json']]);
+        $this->client->request('PATCH', $uri, ['json' => ['name' => 'Kubek XL'], 'headers' => ['Content-Type' => 'application/json']]);
 
         self::assertResponseStatusCodeSame(415);
     }
 
     public function testPutIsNotAvailable(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->client->request('PUT', $iri, ['json' => ['name' => 'Kubek XL']]);
+        $this->client->request('PUT', $uri, ['json' => ['name' => 'Kubek XL']]);
 
         self::assertResponseStatusCodeSame(405);
     }
 
     public function testMethodOverrideHeaderIsIgnored(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->client->request('POST', $iri, ['json' => [], 'headers' => ['X-HTTP-Method-Override' => 'DELETE']]);
+        $this->client->request('POST', $uri, ['json' => [], 'headers' => ['X-HTTP-Method-Override' => 'DELETE']]);
         self::assertResponseStatusCodeSame(405);
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseIsSuccessful();
     }
 
     public function testDelete(): void
     {
-        $iri = $this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
+        $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->client->request('DELETE', $iri);
+        $this->client->request('DELETE', $uri);
         self::assertResponseStatusCodeSame(204);
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', $uri);
         self::assertResponseStatusCodeSame(404);
     }
 
@@ -261,26 +286,26 @@ final class ProductApiTest extends ApiTestCase
      *
      * @return array{created_at: string, updated_at: string}
      */
-    private function backdateTimestamps(string $iri): array
+    private function backdateTimestamps(string $uri): array
     {
-        static::getContainer()->get(Connection::class)->executeStatement(
+        $this->db()->executeStatement(
             'UPDATE product SET created_at = created_at - INTERVAL 1 HOUR, updated_at = updated_at - INTERVAL 1 HOUR WHERE id = ?',
-            [(int) basename($iri)],
+            [(int) basename($uri)],
         );
 
-        return $this->storedTimestamps($iri);
+        return $this->storedTimestamps($uri);
     }
 
     /**
      * @param array{created_at: string, updated_at: string} $before
      */
-    private function assertTimestampsAfterUpdate(string $iri, array $before): void
+    private function assertTimestampsAfterUpdate(string $uri, array $before): void
     {
-        $stored = $this->storedTimestamps($iri);
+        $stored = $this->storedTimestamps($uri);
         self::assertSame($before['created_at'], $stored['created_at']);
         self::assertGreaterThan($before['updated_at'], $stored['updated_at']);
 
-        $read = $this->client->request('GET', $iri)->toArray();
+        $read = $this->client->request('GET', $uri)->toArray();
         self::assertEquals(new \DateTimeImmutable($before['created_at']), new \DateTimeImmutable($read['createdAt']));
         self::assertGreaterThan(new \DateTimeImmutable($before['updated_at']), new \DateTimeImmutable($read['updatedAt']));
     }
@@ -288,40 +313,12 @@ final class ProductApiTest extends ApiTestCase
     /**
      * @return array{created_at: string, updated_at: string}
      */
-    private function storedTimestamps(string $iri): array
+    private function storedTimestamps(string $uri): array
     {
-        $row = static::getContainer()->get(Connection::class)
-            ->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [(int) basename($iri)]);
+        $row = $this->db()
+            ->fetchAssociative('SELECT created_at, updated_at FROM product WHERE id = ?', [(int) basename($uri)]);
         self::assertIsArray($row);
 
         return ['created_at' => (string) $row['created_at'], 'updated_at' => (string) $row['updated_at']];
-    }
-
-    private function createCategory(string $code): string
-    {
-        return $this->client->request('POST', '/api/categories', ['json' => ['code' => $code]])->toArray()['@id'];
-    }
-
-    /**
-     * @param list<string> $categories
-     */
-    private function createProduct(string $name, string $price, array $categories): string
-    {
-        return $this->client->request('POST', '/api/products', ['json' => [
-            'name' => $name,
-            'price' => $price,
-            'categories' => $categories,
-        ]])->toArray()['@id'];
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function patch(string $iri, array $data): void
-    {
-        $this->client->request('PATCH', $iri, [
-            'json' => $data,
-            'headers' => ['Content-Type' => 'application/merge-patch+json'],
-        ]);
     }
 }

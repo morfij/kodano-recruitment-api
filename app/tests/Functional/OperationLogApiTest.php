@@ -4,26 +4,14 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
-use ApiPlatform\Test\ApiTestCase;
-use ApiPlatform\Test\Client;
-use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 final class OperationLogApiTest extends ApiTestCase
 {
-    protected static ?bool $alwaysBootKernel = false;
-
-    private Client $client;
-
-    protected function setUp(): void
-    {
-        $this->client = static::createClient([], ['auth_bearer' => $_SERVER['API_TOKEN']]);
-    }
-
     public function testListsEntriesNewestFirst(): void
     {
-        $id = $this->createProduct('Kubek');
-        $this->patch($id, ['name' => 'Kubek XL']);
+        $id = $this->createProductInCategory('Kubek');
+        $this->patch('/api/products/'.$id, ['name' => 'Kubek XL']);
         $this->client->request('DELETE', '/api/products/'.$id);
 
         $entries = $this->list('/api/operation_logs');
@@ -35,14 +23,14 @@ final class OperationLogApiTest extends ApiTestCase
 
     public function testGetItem(): void
     {
-        $id = $this->createProduct('Kubek');
-        $iri = $this->list('/api/operation_logs')[0]['@id'];
+        $id = $this->createProductInCategory('Kubek');
+        $logId = $this->list('/api/operation_logs')[0]['id'];
 
-        $this->client->request('GET', $iri);
+        $this->client->request('GET', '/api/operation_logs/'.$logId);
 
         self::assertResponseIsSuccessful();
         self::assertJsonContains([
-            '@id' => $iri,
+            'id' => $logId,
             'operation' => 'created',
             'productId' => $id,
             'payload' => ['name' => 'Kubek', 'price' => '19.99', 'categories' => ['MUGS']],
@@ -51,9 +39,9 @@ final class OperationLogApiTest extends ApiTestCase
 
     public function testFilterByProductId(): void
     {
-        $kubek = $this->createProduct('Kubek');
-        $talerz = $this->createProduct('Talerz', 'PLATES');
-        $this->patch($kubek, ['name' => 'Kubek XL']);
+        $kubek = $this->createProductInCategory('Kubek');
+        $talerz = $this->createProductInCategory('Talerz', 'PLATES');
+        $this->patch('/api/products/'.$kubek, ['name' => 'Kubek XL']);
 
         self::assertSame([['created', $talerz]], $this->summary($this->list('/api/operation_logs?productId='.$talerz)));
         self::assertSame([['updated', $kubek], ['created', $kubek]], $this->summary($this->list('/api/operation_logs?productId='.$kubek)));
@@ -61,19 +49,19 @@ final class OperationLogApiTest extends ApiTestCase
 
     public function testFilterByOperation(): void
     {
-        $kubek = $this->createProduct('Kubek');
-        $this->createProduct('Talerz', 'PLATES');
-        $this->patch($kubek, ['name' => 'Kubek XL']);
+        $kubek = $this->createProductInCategory('Kubek');
+        $this->createProductInCategory('Talerz', 'PLATES');
+        $this->patch('/api/products/'.$kubek, ['name' => 'Kubek XL']);
 
         self::assertSame([['updated', $kubek]], $this->summary($this->list('/api/operation_logs?operation=updated')));
     }
 
     public function testCombinedFilters(): void
     {
-        $kubek = $this->createProduct('Kubek');
-        $talerz = $this->createProduct('Talerz', 'PLATES');
-        $this->patch($kubek, ['name' => 'Kubek XL']);
-        $this->patch($talerz, ['name' => 'Talerz XL']);
+        $kubek = $this->createProductInCategory('Kubek');
+        $talerz = $this->createProductInCategory('Talerz', 'PLATES');
+        $this->patch('/api/products/'.$kubek, ['name' => 'Kubek XL']);
+        $this->patch('/api/products/'.$talerz, ['name' => 'Talerz XL']);
 
         self::assertSame(
             [['updated', $talerz]],
@@ -83,9 +71,9 @@ final class OperationLogApiTest extends ApiTestCase
 
     public function testFilterByDate(): void
     {
-        $old = $this->createProduct('Kubek');
-        $new = $this->createProduct('Talerz', 'PLATES');
-        static::getContainer()->get(Connection::class)->executeStatement(
+        $old = $this->createProductInCategory('Kubek');
+        $new = $this->createProductInCategory('Talerz', 'PLATES');
+        $this->db()->executeStatement(
             "UPDATE operation_log SET created_at = '2026-01-15 12:00:00' WHERE product_id = ?",
             [$old],
         );
@@ -131,37 +119,20 @@ final class OperationLogApiTest extends ApiTestCase
     #[DataProvider('writeMethods')]
     public function testLogIsReadOnly(string $method): void
     {
-        $this->createProduct('Kubek');
-        $iri = $this->list('/api/operation_logs')[0]['@id'];
+        $this->createProductInCategory('Kubek');
+        $uri = '/api/operation_logs/'.$this->list('/api/operation_logs')[0]['id'];
 
-        $this->client->request($method, 'POST' === $method ? '/api/operation_logs' : $iri, [
+        $this->client->request($method, 'POST' === $method ? '/api/operation_logs' : $uri, [
             'json' => ['operation' => 'deleted'],
-            'headers' => ['Content-Type' => 'PATCH' === $method ? 'application/merge-patch+json' : 'application/ld+json'],
+            'headers' => ['Content-Type' => 'PATCH' === $method ? 'application/merge-patch+json' : 'application/json'],
         ]);
 
         self::assertResponseStatusCodeSame(405);
     }
 
-    private function createProduct(string $name, string $categoryCode = 'MUGS'): int
+    private function createProductInCategory(string $name, string $categoryCode = 'MUGS'): int
     {
-        $category = $this->client->request('POST', '/api/categories', ['json' => ['code' => $categoryCode]])->toArray()['@id'];
-
-        return $this->client->request('POST', '/api/products', ['json' => [
-            'name' => $name,
-            'price' => '19.99',
-            'categories' => [$category],
-        ]])->toArray()['id'];
-    }
-
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function patch(int $id, array $data): void
-    {
-        $this->client->request('PATCH', '/api/products/'.$id, [
-            'json' => $data,
-            'headers' => ['Content-Type' => 'application/merge-patch+json'],
-        ]);
+        return $this->createProduct($name, '19.99', [$this->createCategory($categoryCode)]);
     }
 
     /**
@@ -172,7 +143,7 @@ final class OperationLogApiTest extends ApiTestCase
         $response = $this->client->request('GET', $url);
         self::assertResponseIsSuccessful();
 
-        return $response->toArray()['member'];
+        return $response->toArray()['items'];
     }
 
     /**

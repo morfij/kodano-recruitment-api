@@ -78,7 +78,11 @@ class Product
     #[ORM\InverseJoinColumn(onDelete: 'RESTRICT')]
     #[Assert\Count(min: 1)]
     #[Groups(['product:read', 'product:write'])]
-    #[ApiProperty(readableLink: false, writableLink: false)]
+    #[ApiProperty(
+        readableLink: false,
+        writableLink: false,
+        schema: ['type' => 'array', 'items' => ['type' => 'integer'], 'example' => [1, 2]],
+    )]
     private Collection $categories;
 
     /**
