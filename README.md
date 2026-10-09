@@ -40,7 +40,7 @@ All further commands are run from the repository root. `make help` lists short a
 
 There are two levels of settings.
 
-**Docker Compose** reads an optional `.env` in the repository root. Copy `.env.example` and adjust it before `docker compose up` if the defaults do not fit:
+**Docker Compose** reads an optional `.env` in the repository root. Copy `.env.example` and adjust it before `docker compose up` if the defaults do not fit. All ports are published on `127.0.0.1` only, so the API, Mailpit and Adminer are not reachable from other machines:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -59,14 +59,19 @@ There are two levels of settings.
 | `MAILER_FROM` | `Kodano API <noreply@example.com>` | Sender of notification e-mails |
 | `MAILER_TO` | `catalog@example.com` | Recipient of notification e-mails |
 | `API_TOKEN` | empty | Bearer token required by the API; empty rejects every request |
+| `API_WRITE_LIMIT` | `60` | `POST` / `PATCH` / `DELETE` requests per client IP and minute |
 
 `APP_SECRET` and `API_TOKEN` are not stored in the repository. `composer install` writes random values to `app/.env.local` (ignored by Git) when they are missing there. In production all values come from real environment variables, which take precedence over `.env` files.
+
+The defaults (`APP_ENV=dev`) are meant for local work: error responses include stack traces. A shared or public instance needs `APP_ENV=prod` and `APP_DEBUG=0`, a real `API_TOKEN`, HTTPS in front of nginx, and no published Mailpit or Adminer.
 
 ## API
 
 Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/json`). Collections are paginated (30 items per page) and ordered by `id`; the operation log lists the newest entries first.
 
 Every request under `/api` needs the token from `API_TOKEN` in an `Authorization: Bearer <token>` header (with curl: `--oauth2-bearer "$TOKEN"`, see [Examples](#examples)); without it the API answers `401`. Swagger UI and the OpenAPI document under `/api/docs` stay public; use **Authorize** in Swagger UI to send requests from there.
+
+Write requests are limited per client IP (`API_WRITE_LIMIT` per minute); over the limit the API answers `429` with a `Retry-After` header and changes nothing. Reads are not limited.
 
 | Method | Path | Description |
 |---|---|---|
@@ -106,7 +111,7 @@ A category that is still linked to a product cannot be deleted: the API returns 
 
 Two `PATCH` requests for the same product that overlap in time do not overwrite each other: the second one is rejected with `409` and changes nothing, so it can be retried on the current state.
 
-Response codes: `201` created, `200` OK, `401` missing or wrong API token, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Response codes: `201` created, `200` OK, `401` missing or wrong API token, `429` too many write requests, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
@@ -303,8 +308,8 @@ docker compose exec php composer test
 
 `composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent. The tests generate their own random API token.
 
-- `app/tests/Unit` — the API token check, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a successful response when a channel fails, and the operation log endpoint with its filters.
+- `app/tests/Unit` — the API token check, the write rate limit, the `409` when a category gets linked while it is being deleted, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
+- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a duplicate category code from a concurrent request reported as a normal violation, `X-HTTP-Method-Override` being ignored, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
@@ -346,12 +351,13 @@ docker compose --profile tools down
     ├── src/
     │   ├── DataFixtures/      AppFixtures (demo data)
     │   ├── Entity/            Product, Category, OperationLog, TimestampableTrait
+    │   ├── EventSubscriber/   ApiWriteRateLimitSubscriber
     │   ├── Enum/              ProductOperation
     │   ├── Message/           ProductNotification
     │   ├── MessageHandler/    SendProductNotificationHandler
     │   ├── Notification/      NotificationChannelInterface, EmailNotificationChannel
     │   ├── Security/          ApiTokenHandler, ApiTokenEntryPoint
-    │   └── State/             ProductStateProcessor, CategoryDeleteProcessor
+    │   └── State/             ProductStateProcessor, CategoryPersistProcessor, CategoryDeleteProcessor
     ├── templates/email/
     └── tests/
 ```
@@ -368,3 +374,5 @@ docker compose --profile tools down
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
 - **One shared bearer token.** The task does not define users or roles, so a single token from the environment protects the whole API with Symfony's built-in `access_token` authenticator and no extra packages. Per-client tokens or JWT can replace the token handler when the API gets real consumers.
+- **Write rate limit in the application.** Each write produces a log entry and an e-mail, so the limit sits next to the code that causes them. The state is kept in the Symfony cache; with several servers `cache_pool` in `rate_limiter.yaml` can point to a shared store such as Redis.
+- **Database errors never reach the client.** The UNIQUE index and the `RESTRICT` foreign key back up the validation in races; their errors are turned into the same `422` / `409` a sequential request gets.
