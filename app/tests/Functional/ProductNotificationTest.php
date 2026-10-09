@@ -110,8 +110,14 @@ final class ProductNotificationTest extends ApiTestCase
         self::assertResponseStatusCodeSame(500);
         self::assertEmailCount(0);
 
+        $failingLog->failNextPersist();
+        $this->client->request('DELETE', $iri);
+        self::assertResponseStatusCodeSame(500);
+        self::assertEmailCount(0);
+
         $db = static::getContainer()->get(Connection::class);
         self::assertSame(['Kubek'], $db->fetchFirstColumn('SELECT name FROM product'));
+        self::assertSame(1, $this->rowCount('product_category'));
         self::assertSame([['created', $id, ['name' => 'Kubek', 'price' => '19.99', 'categories' => ['MUGS']]]], $this->logEntries());
     }
 
