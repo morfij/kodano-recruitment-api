@@ -58,12 +58,15 @@ There are two levels of settings.
 | `MAILER_DSN` | `smtp://mailer:1025` | Mailpit inside Docker |
 | `MAILER_FROM` | `Kodano API <noreply@example.com>` | Sender of notification e-mails |
 | `MAILER_TO` | `catalog@example.com` | Recipient of notification e-mails |
+| `API_TOKEN` | empty | Bearer token required by the API; empty rejects every request |
 
-`APP_SECRET` is not stored in the repository. The first `composer install` writes a random one to `app/.env.local` (ignored by Git). In production all values come from real environment variables, which take precedence over `.env` files.
+`APP_SECRET` and `API_TOKEN` are not stored in the repository. `composer install` writes random values to `app/.env.local` (ignored by Git) when they are missing there. In production all values come from real environment variables, which take precedence over `.env` files.
 
 ## API
 
 Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/json`). Collections are paginated (30 items per page) and ordered by `id`; the operation log lists the newest entries first.
+
+Every request under `/api` needs the token from `API_TOKEN` in an `Authorization: Bearer <token>` header (with curl: `--oauth2-bearer "$TOKEN"`, see [Examples](#examples)); without it the API answers `401`. Swagger UI and the OpenAPI document under `/api/docs` stay public; use **Authorize** in Swagger UI to send requests from there.
 
 | Method | Path | Description |
 |---|---|---|
@@ -92,9 +95,9 @@ Fields:
 The operation log is read-only (`POST` / `PATCH` / `DELETE` return `405`). Each entry has `operation`, `productId` (a number, since the product may already be gone), `payload` and `createdAt`. The list can be filtered, and filters can be combined:
 
 ```bash
-curl -s 'http://localhost:8080/api/operation_logs?productId=1'
-curl -s 'http://localhost:8080/api/operation_logs?operation=deleted'
-curl -s -g 'http://localhost:8080/api/operation_logs?createdAt[after]=2026-10-01&createdAt[before]=2026-10-31'
+curl -s --oauth2-bearer "$TOKEN" 'http://localhost:8080/api/operation_logs?productId=1'
+curl -s --oauth2-bearer "$TOKEN" 'http://localhost:8080/api/operation_logs?operation=deleted'
+curl -s --oauth2-bearer "$TOKEN" -g 'http://localhost:8080/api/operation_logs?createdAt[after]=2026-10-01&createdAt[before]=2026-10-31'
 ```
 
 An unknown `operation` or a non-integer `productId` returns `422`; a date that cannot be parsed is ignored.
@@ -103,16 +106,20 @@ A category that is still linked to a product cannot be deleted: the API returns 
 
 Two `PATCH` requests for the same product that overlap in time do not overwrite each other: the second one is rejected with `409` and changes nothing, so it can be retried on the current state.
 
-Response codes: `201` created, `200` OK, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Response codes: `201` created, `200` OK, `401` missing or wrong API token, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
-The examples start from an empty database, so skip the demo data or recreate the database first (`docker compose down -v`, then the Quick start commands).
+The examples start from an empty database, so skip the demo data or recreate the database first (`docker compose down -v`, then the Quick start commands). They read the token from `app/.env.local`:
+
+```bash
+TOKEN=$(sed -n 's/^API_TOKEN=//p' app/.env.local)
+```
 
 Create the first category:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/categories \
+curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/categories \
   -H 'Content-Type: application/ld+json' \
   -d '{"code": "MUGS"}'
 ```
@@ -134,7 +141,7 @@ Response (`201`, formatted):
 Create a product in that category:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/products \
+curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/products \
   -H 'Content-Type: application/ld+json' \
   -d '{"name": "Kubek", "price": "19.99", "categories": ["/api/categories/1"]}'
 ```
@@ -158,26 +165,26 @@ Response (`201`, formatted):
 Read, update and delete it:
 
 ```bash
-curl -s http://localhost:8080/api/products
-curl -s -H 'Accept: application/json' http://localhost:8080/api/products/1
+curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/products
+curl -s --oauth2-bearer "$TOKEN" -H 'Accept: application/json' http://localhost:8080/api/products/1
 
-curl -s -X PATCH http://localhost:8080/api/products/1 \
+curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
   -H 'Content-Type: application/merge-patch+json' \
   -d '{"name": "Kubek XL", "price": "24.99"}'
 
-curl -s -X POST http://localhost:8080/api/categories \
+curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/categories \
   -H 'Content-Type: application/ld+json' -d '{"code": "CUPS"}'
-curl -s -X PATCH http://localhost:8080/api/products/1 \
+curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
   -H 'Content-Type: application/merge-patch+json' \
   -d '{"categories": ["/api/categories/2"]}'
 
-curl -s -o /dev/null -w '%{http_code}\n' -X DELETE http://localhost:8080/api/products/1
+curl -s --oauth2-bearer "$TOKEN" -o /dev/null -w '%{http_code}\n' -X DELETE http://localhost:8080/api/products/1
 ```
 
 A validation error:
 
 ```bash
-curl -s -X POST http://localhost:8080/api/products \
+curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/products \
   -H 'Content-Type: application/ld+json' \
   -d '{"name": "Kubek", "price": "19,99", "categories": []}'
 ```
@@ -187,7 +194,7 @@ returns `422` with one entry in `violations` for `price` and one for `categories
 After these calls Mailpit shows one e-mail per product change, and the operation log holds the same events:
 
 ```bash
-curl -s http://localhost:8080/api/operation_logs
+curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/operation_logs
 ```
 
 ## Operation log and notifications
@@ -294,10 +301,10 @@ The operation log is not affected: it stays in the same transaction as the produ
 docker compose exec php composer test
 ```
 
-`composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent.
+`composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent. The tests generate their own random API token.
 
-- `app/tests/Unit` — the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a successful response when a channel fails, and the operation log endpoint with its filters.
+- `app/tests/Unit` — the API token check, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
+- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
@@ -343,6 +350,7 @@ docker compose --profile tools down
     │   ├── Message/           ProductNotification
     │   ├── MessageHandler/    SendProductNotificationHandler
     │   ├── Notification/      NotificationChannelInterface, EmailNotificationChannel
+    │   ├── Security/          ApiTokenHandler, ApiTokenEntryPoint
     │   └── State/             ProductStateProcessor, CategoryDeleteProcessor
     ├── templates/email/
     └── tests/
@@ -359,4 +367,4 @@ docker compose --profile tools down
 - **Optimistic locking on products.** Each request validates its own category list, so two overlapping updates could still remove different categories and leave none. A Doctrine version column makes the later write fail with `409`; clients do not send the version, so the API stays plain `PATCH`.
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
-- **No authentication.** It is not required here; it would be the next step before exposing the API.
+- **One shared bearer token.** The task does not define users or roles, so a single token from the environment protects the whole API with Symfony's built-in `access_token` authenticator and no extra packages. Per-client tokens or JWT can replace the token handler when the API gets real consumers.
