@@ -12,9 +12,9 @@ use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\RateLimiter\RateLimiterFactoryInterface;
 
 /**
- * Every API write is logged and e-mailed, so writes are limited per client IP.
- * Runs after routing, so the error is rendered by API Platform, and before the
- * firewall, so requests with a wrong token count too.
+ * Limits all API writes per client IP. Product changes are the expensive ones (log
+ * entry and e-mail), but category writes and attempts with a wrong token count too.
+ * Runs after routing, so the error is rendered by API Platform, and before the firewall.
  */
 final class ApiWriteRateLimitSubscriber implements EventSubscriberInterface
 {

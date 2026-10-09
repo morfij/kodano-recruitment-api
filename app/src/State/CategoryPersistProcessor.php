@@ -39,8 +39,9 @@ final class CategoryPersistProcessor implements ProcessorInterface
             return $this->persistProcessor->process($data, $operation, $uriVariables, $context);
         } catch (UniqueConstraintViolationException) {
             $message = (new UniqueEntity(fields: ['code']))->message;
+            $violation = new ConstraintViolation($message, $message, [], $data, 'code', $data->getCode(), code: UniqueEntity::NOT_UNIQUE_ERROR);
 
-            throw new ValidationException(new ConstraintViolationList([new ConstraintViolation($message, $message, [], $data, 'code', $data->getCode(), code: UniqueEntity::NOT_UNIQUE_ERROR)]));
+            throw new ValidationException(new ConstraintViolationList([$violation]));
         }
     }
 }
