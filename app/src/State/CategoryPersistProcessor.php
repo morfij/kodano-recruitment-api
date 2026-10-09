@@ -40,9 +40,7 @@ final class CategoryPersistProcessor implements ProcessorInterface
         } catch (UniqueConstraintViolationException) {
             $message = (new UniqueEntity(fields: ['code']))->message;
 
-            throw new ValidationException(new ConstraintViolationList([
-                new ConstraintViolation($message, $message, [], $data, 'code', $data->getCode(), code: UniqueEntity::NOT_UNIQUE_ERROR),
-            ]));
+            throw new ValidationException(new ConstraintViolationList([new ConstraintViolation($message, $message, [], $data, 'code', $data->getCode(), code: UniqueEntity::NOT_UNIQUE_ERROR)]));
         }
     }
 }
