@@ -69,7 +69,13 @@ The defaults (`APP_ENV=dev`) are meant for local work: error responses include s
 
 ## API
 
-Formats: JSON-LD (`application/ld+json`, default) and plain JSON (`application/json`). Collections are paginated (30 items per page) and ordered by `id`; the operation log lists the newest entries first.
+Requests and responses are plain JSON (`application/json`); `PATCH` takes `application/merge-patch+json`, and errors are returned as `application/problem+json`.
+
+Collections are paginated, 30 items per page, ordered by `id` (the operation log lists the newest entries first). The next pages are requested with `?page=2`, `?page=3`, …; a page past the end has an empty `items` list:
+
+```json
+{"items": [{"id": 1, "code": "MUGS", "createdAt": "…", "updatedAt": "…"}], "totalItems": 4, "page": 1, "itemsPerPage": 30}
+```
 
 Every request under `/api` needs the token from `API_TOKEN` in an `Authorization: Bearer <token>` header (with curl: `--oauth2-bearer "$TOKEN"`, see [Examples](#examples)); without it the API answers `401`. Swagger UI and the OpenAPI document under `/api/docs` stay public; use **Authorize** in Swagger UI to send requests from there.
 
@@ -92,12 +98,12 @@ Write requests are limited per client IP (`API_WRITE_LIMIT` per minute); over th
 
 Fields:
 
-- **Product**: `id`, `name` (required, up to 255 characters), `price`, `categories` (at least one, as IRIs such as `"/api/categories/1"`), `createdAt`, `updatedAt`.
+- **Product**: `id`, `name` (required, up to 255 characters), `price`, `categories` (at least one, as a list of category IDs such as `[1, 2]`), `createdAt`, `updatedAt`.
 - **Category**: `id`, `code` (required, unique, up to 10 characters), `createdAt`, `updatedAt`.
 - `id`, `createdAt` and `updatedAt` are read-only and set automatically. A product's `updatedAt` changes on every successful `PATCH`, even when no value changed; a category's changes when its code does.
 - **Price** is a string with a dot as decimal separator, up to 8 digits before it and 2 after it (`"19.99"`, `"5"`, `"0.5"`). It is stored as `DECIMAL(10,2)` and returned with two decimals (`"5"` becomes `"5.00"`). A number instead of a string, a comma, a minus sign or a third decimal is rejected.
 
-`PATCH` follows JSON Merge Patch: omitted fields stay unchanged, `categories` replaces the whole list, and `null` for `name` / `price` or an empty `categories` list is a validation error.
+`PATCH` follows JSON Merge Patch: omitted fields stay unchanged, `categories` replaces the whole list, and `null` for `name` / `price` or an empty `categories` list is a validation error. A category ID that does not exist, or anything other than a list of integer IDs, is rejected with `422` on `categories`; a repeated ID is stored once.
 
 The operation log is read-only (`POST` / `PATCH` / `DELETE` return `405`). Each entry has `operation`, `productId` (a number, since the product may already be gone), `payload` and `createdAt`. The list can be filtered, and filters can be combined:
 
@@ -113,7 +119,7 @@ A category that is still linked to a product cannot be deleted: the API returns 
 
 Two `PATCH` requests for the same product that overlap in time do not overwrite each other: the second one is rejected with `409` and changes nothing, so it can be retried on the current state.
 
-Response codes: `201` created, `200` OK, `401` missing or wrong API token, `429` too many write requests, `204` deleted, `400` malformed request (e.g. unknown category IRI), `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Response codes: `201` created, `200` OK, `401` missing or wrong API token, `429` too many write requests, `204` deleted, `400` malformed JSON, `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
@@ -127,7 +133,7 @@ Create the first category:
 
 ```bash
 curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/categories \
-  -H 'Content-Type: application/ld+json' \
+  -H 'Content-Type: application/json' \
   -d '{"code": "MUGS"}'
 ```
 
@@ -135,9 +141,6 @@ Response (`201`, formatted):
 
 ```json
 {
-    "@context": "/api/contexts/Category",
-    "@id": "/api/categories/1",
-    "@type": "Category",
     "id": 1,
     "code": "MUGS",
     "createdAt": "2026-10-11T10:00:00+00:00",
@@ -149,21 +152,18 @@ Create a product in that category:
 
 ```bash
 curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/products \
-  -H 'Content-Type: application/ld+json' \
-  -d '{"name": "Kubek", "price": "19.99", "categories": ["/api/categories/1"]}'
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Kubek", "price": "19.99", "categories": [1]}'
 ```
 
 Response (`201`, formatted):
 
 ```json
 {
-    "@context": "/api/contexts/Product",
-    "@id": "/api/products/1",
-    "@type": "Product",
     "id": 1,
     "name": "Kubek",
     "price": "19.99",
-    "categories": ["/api/categories/1"],
+    "categories": [1],
     "createdAt": "2026-10-11T10:00:05+00:00",
     "updatedAt": "2026-10-11T10:00:05+00:00"
 }
@@ -173,17 +173,17 @@ Read, update and delete it:
 
 ```bash
 curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/products
-curl -s --oauth2-bearer "$TOKEN" -H 'Accept: application/json' http://localhost:8080/api/products/1
+curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/products/1
 
 curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
   -H 'Content-Type: application/merge-patch+json' \
   -d '{"name": "Kubek XL", "price": "24.99"}'
 
 curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/categories \
-  -H 'Content-Type: application/ld+json' -d '{"code": "CUPS"}'
+  -H 'Content-Type: application/json' -d '{"code": "CUPS"}'
 curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
   -H 'Content-Type: application/merge-patch+json' \
-  -d '{"categories": ["/api/categories/2"]}'
+  -d '{"categories": [2]}'
 
 curl -s --oauth2-bearer "$TOKEN" -o /dev/null -w '%{http_code}\n' -X DELETE http://localhost:8080/api/products/1
 ```
@@ -192,7 +192,7 @@ A validation error:
 
 ```bash
 curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/products \
-  -H 'Content-Type: application/ld+json' \
+  -H 'Content-Type: application/json' \
   -d '{"name": "Kubek", "price": "19,99", "categories": []}'
 ```
 
@@ -314,7 +314,7 @@ docker compose exec php composer test
 `composer test` applies the migrations to the separate test database `app_test` and runs PHPUnit. Each test runs in a transaction that is rolled back afterwards, and e-mails are collected instead of sent. The tests generate their own random API token.
 
 - `app/tests/Unit` — the API token check, the write rate limit rules, the `409` when a category gets linked while it is being deleted, the notification handler (channel selection, a channel failing in `supports()` or `send()` does not stop the others, failures are logged) and the e-mail channel (sender, recipient, subject, templates). They need no database: `docker compose exec php bin/phpunit tests/Unit`.
-- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a duplicate category code from a concurrent request reported as a normal violation, `X-HTTP-Method-Override` being ignored, error responses without debug (no trace or SQL), the rate limit holding for parallel PHP processes, a successful response when a channel fails, and the operation log endpoint with its filters.
+- `app/tests/Functional` — the API against MySQL: `401` without a valid token and public docs, CRUD, validation and price format, `PATCH` semantics, timestamps after a reload from the database, category updates and the `409` for a category in use, operation log and e-mail for each product change, no side effects on validation errors, rollback of create, update and delete when the log cannot be written, a stale concurrent update that is rejected, a duplicate category code from a concurrent request reported as a normal violation, `X-HTTP-Method-Override` being ignored, the plain JSON format with the paginated `items` wrapper and its OpenAPI schema, category IDs (unknown, malformed and repeated), error responses without debug (no trace or SQL), the rate limit holding for parallel PHP processes, a successful response when a channel fails, and the operation log endpoint with its filters.
 
 ## Code quality
 
@@ -356,7 +356,9 @@ MySQL is not exposed on the host. Adminer runs with the other services at http:/
     │   ├── Message/           ProductNotification
     │   ├── MessageHandler/    SendProductNotificationHandler
     │   ├── Notification/      NotificationChannelInterface, EmailNotificationChannel
+    │   ├── OpenApi/           JsonCollectionSchemaFactory
     │   ├── Security/          ApiTokenHandler, ApiTokenEntryPoint
+    │   ├── Serializer/        JsonCollectionNormalizer, ProductCategoriesNormalizer
     │   └── State/             ProductStateProcessor, CategoryPersistProcessor, CategoryDeleteProcessor
     ├── templates/email/
     └── tests/
@@ -372,6 +374,7 @@ MySQL is not exposed on the host. Adminer runs with the other services at http:/
 - **A category in use cannot be deleted.** Deleting it would break the "at least one category" rule, so the API answers `409` and the schema has a `RESTRICT` foreign key as a second guard.
 - **Optimistic locking on products.** Each request validates its own category list, so two overlapping updates could still remove different categories and leave none. A Doctrine version column makes the later write fail with `409`; clients do not send the version, so the API stays plain `PATCH`.
 - **API Platform resources on the entities, serialization groups, no separate DTOs or layers.** For a CRUD with three entities this keeps the code small; validation rules stay next to the fields.
+- **Plain JSON with category IDs instead of JSON-LD.** API Platform's default JSON-LD adds `@context` / `@id` / `@type`, wraps lists in `member` and links categories by IRI. Plain JSON alone would drop the pagination data, so two small serializer classes add the `items` wrapper and turn categories into IDs, and a schema factory decorator keeps the OpenAPI document in line. The operation log keeps category codes, since it records the state at the time of the change.
 - **nginx + PHP-FPM on official images.** A plain, widely known setup with a small `Dockerfile`.
 - **One shared bearer token.** The task does not define users or roles, so a single token from the environment protects the whole API with Symfony's built-in `access_token` authenticator and no extra packages. Per-client tokens or JWT can replace the token handler when the API gets real consumers.
 - **Write rate limit in the application.** Product writes produce a log entry and an e-mail, so the limit sits next to the code that causes them. The counter is kept in the Symfony cache and updated under a lock (`LOCK_DSN`), so parallel PHP workers cannot pass it together. With several servers both need a shared store, e.g. Redis for `cache_pool` in `rate_limiter.yaml` and for `LOCK_DSN`.
