@@ -5,12 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   qa:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # The PHP container runs as the given user so it can write vendor/ and var/ into the checkout.
       - name: Start containers
