@@ -1,8 +1,9 @@
 framework:
     rate_limiter:
         # Writes per client IP; see App\EventSubscriber\ApiWriteRateLimitSubscriber.
-        # The state lives in cache.rate_limiter (filesystem); point cache_pool to a
-        # shared store such as Redis when the API runs on more than one server.
+        # The state lives in cache.rate_limiter (filesystem) and each update runs under
+        # the lock from LOCK_DSN. With more than one server both need a shared store,
+        # e.g. Redis for cache_pool and LOCK_DSN.
         api_write:
             policy: sliding_window
             limit: '%env(int:API_WRITE_LIMIT)%'
