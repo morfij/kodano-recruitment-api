@@ -48,6 +48,23 @@ final class SendProductNotificationHandlerTest extends TestCase
         self::assertSame(['working'], array_column($sent->getArrayCopy(), 0));
     }
 
+    public function testChannelFailingInSupportsDoesNotStopOthers(): void
+    {
+        $sent = $this->sentLog();
+        $exception = new \RuntimeException('Config is missing');
+        $failing = $this->failingChannel($exception, inSupports: true);
+        $working = $this->recordingChannel('working', $sent);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())
+            ->method('error')
+            ->with(self::isString(), self::callback(static fn (array $context): bool => $context['channel'] === $failing::class && $context['exception'] === $exception));
+
+        (new SendProductNotificationHandler([$failing, $working], $logger))($this->notification());
+
+        self::assertSame(['working'], array_column($sent->getArrayCopy(), 0));
+    }
+
     public function testLogsChannelFailure(): void
     {
         $exception = new \RuntimeException('SMTP is down');
@@ -118,15 +135,19 @@ final class SendProductNotificationHandlerTest extends TestCase
         };
     }
 
-    private function failingChannel(\Throwable $exception): NotificationChannelInterface
+    private function failingChannel(\Throwable $exception, bool $inSupports = false): NotificationChannelInterface
     {
-        return new class($exception) implements NotificationChannelInterface {
-            public function __construct(private \Throwable $exception)
+        return new class($exception, $inSupports) implements NotificationChannelInterface {
+            public function __construct(private \Throwable $exception, private bool $inSupports)
             {
             }
 
             public function supports(ProductNotification $notification): bool
             {
+                if ($this->inSupports) {
+                    throw $this->exception;
+                }
+
                 return true;
             }
 

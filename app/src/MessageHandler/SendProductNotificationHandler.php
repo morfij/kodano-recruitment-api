@@ -26,13 +26,11 @@ final class SendProductNotificationHandler
     public function __invoke(ProductNotification $notification): void
     {
         foreach ($this->channels as $channel) {
-            if (!$channel->supports($notification)) {
-                continue;
-            }
-
             // The change is already committed; one failing channel must not stop the others.
             try {
-                $channel->send($notification);
+                if ($channel->supports($notification)) {
+                    $channel->send($notification);
+                }
             } catch (\Throwable $e) {
                 $this->logger->error('Product notification channel failed.', [
                     'channel' => $channel::class,
