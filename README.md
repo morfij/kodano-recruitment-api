@@ -25,6 +25,7 @@ docker compose exec php bin/console doctrine:migrations:migrate -n
 | API entry point | http://localhost:8080/api |
 | Swagger UI / OpenAPI | http://localhost:8080/api/docs |
 | Mailpit (sent e-mails) | http://localhost:8025 |
+| Adminer (database UI) | http://localhost:8081 |
 
 Optionally load demo data (4 categories, 8 products):
 
@@ -46,7 +47,7 @@ There are two levels of settings.
 |---|---|---|
 | `HTTP_PORT` | `8080` | API port on the host |
 | `MAILPIT_PORT` | `8025` | Mailpit UI port |
-| `ADMINER_PORT` | `8081` | Adminer port (optional tool) |
+| `ADMINER_PORT` | `8081` | Adminer port |
 | `MYSQL_PASSWORD` | `app` | Password of the local MySQL user `app` |
 | `UID` / `GID` | `1000` | Host user; files written by the PHP container belong to it |
 
@@ -333,12 +334,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the same three checks in the sa
 docker compose exec database mysql -uapp -papp app
 ```
 
-MySQL is not exposed on the host. For a web UI, start Adminer (server `database`, user and password `app`):
-
-```bash
-docker compose --profile tools up -d    # http://localhost:8081
-docker compose --profile tools down
-```
+MySQL is not exposed on the host. Adminer runs with the other services at http://localhost:8081 (server `database`, user and password `app`).
 
 ## Project layout
 
@@ -347,7 +343,7 @@ docker compose --profile tools down
 ├── Dockerfile                 PHP 8.4-FPM image
 ├── Makefile                   Short aliases for Docker Compose commands
 ├── .github/workflows/ci.yml   PHPStan, coding style and tests on GitHub Actions
-├── compose.yaml               php, nginx, database (MySQL 8.4), mailer (Mailpit), adminer (optional)
+├── compose.yaml               php, nginx, database (MySQL 8.4), mailer (Mailpit), adminer
 ├── docker/                    nginx and MySQL configuration
 └── app/                       Symfony application
     ├── config/
