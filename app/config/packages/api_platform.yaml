@@ -13,7 +13,8 @@ api_platform:
             bearer:
                 scheme: bearer
     patch_formats:
-        json: ['application/merge-patch+json']
+        # Both are applied as JSON Merge Patch (RFC 7396): omitted fields stay unchanged.
+        json: ['application/merge-patch+json', 'application/json']
     defaults:
         stateless: true
         cache_headers:

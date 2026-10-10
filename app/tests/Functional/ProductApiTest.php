@@ -241,11 +241,11 @@ final class ProductApiTest extends ApiTestCase
         $this->assertTimestampsAfterUpdate($uri, $before);
     }
 
-    public function testPatchRequiresMergePatchContentType(): void
+    public function testPatchRejectsUnsupportedContentType(): void
     {
         $uri = '/api/products/'.$this->createProduct('Kubek', '19.99', [$this->createCategory('MUGS')]);
 
-        $this->client->request('PATCH', $uri, ['json' => ['name' => 'Kubek XL'], 'headers' => ['Content-Type' => 'application/json']]);
+        $this->client->request('PATCH', $uri, ['body' => 'name=Kubek XL', 'headers' => ['Content-Type' => 'text/plain']]);
 
         self::assertResponseStatusCodeSame(415);
     }

@@ -69,7 +69,7 @@ The defaults (`APP_ENV=dev`) are meant for local work: error responses include s
 
 ## API
 
-Requests and responses are plain JSON (`application/json`); `PATCH` takes `application/merge-patch+json`, and errors are returned as `application/problem+json`.
+Requests and responses are plain JSON (`application/json`), errors are returned as `application/problem+json`. `PATCH` accepts `application/json` as well as the standard `application/merge-patch+json`; both are applied as JSON Merge Patch.
 
 Collections are paginated, 30 items per page, ordered by `id` (the operation log lists the newest entries first). The next pages are requested with `?page=2`, `?page=3`, …; a page past the end has an empty `items` list:
 
@@ -86,12 +86,12 @@ Write requests are limited per client IP (`API_WRITE_LIMIT` per minute); over th
 | `GET` | `/api/products` | List products |
 | `GET` | `/api/products/{id}` | Get one product with its categories |
 | `POST` | `/api/products` | Create a product |
-| `PATCH` | `/api/products/{id}` | Update a product (`application/merge-patch+json`) |
+| `PATCH` | `/api/products/{id}` | Update a product |
 | `DELETE` | `/api/products/{id}` | Delete a product |
 | `GET` | `/api/categories` | List categories |
 | `GET` | `/api/categories/{id}` | Get one category |
 | `POST` | `/api/categories` | Create a category |
-| `PATCH` | `/api/categories/{id}` | Change the category code (`application/merge-patch+json`) |
+| `PATCH` | `/api/categories/{id}` | Change the category code |
 | `DELETE` | `/api/categories/{id}` | Delete a category that no product uses |
 | `GET` | `/api/operation_logs` | List operation log entries, newest first |
 | `GET` | `/api/operation_logs/{id}` | Get one log entry |
@@ -119,7 +119,7 @@ A category that is still linked to a product cannot be deleted: the API returns 
 
 Two `PATCH` requests for the same product that overlap in time do not overwrite each other: the second one is rejected with `409` and changes nothing, so it can be retried on the current state.
 
-Response codes: `201` created, `200` OK, `401` missing or wrong API token, `429` too many write requests, `204` deleted, `400` malformed JSON, `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` wrong `Content-Type` for `PATCH`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
+Response codes: `201` created, `200` OK, `401` missing or wrong API token, `429` too many write requests, `204` deleted, `400` malformed JSON, `404` not found, `405` method not available, `409` category still in use or product changed by a concurrent request, `415` unsupported `Content-Type`, `422` validation error (details in `violations`), `500` the change could not be saved (nothing was changed).
 
 ## Examples
 
@@ -176,13 +176,13 @@ curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/products
 curl -s --oauth2-bearer "$TOKEN" http://localhost:8080/api/products/1
 
 curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
-  -H 'Content-Type: application/merge-patch+json' \
+  -H 'Content-Type: application/json' \
   -d '{"name": "Kubek XL", "price": "24.99"}'
 
 curl -s --oauth2-bearer "$TOKEN" -X POST http://localhost:8080/api/categories \
   -H 'Content-Type: application/json' -d '{"code": "CUPS"}'
 curl -s --oauth2-bearer "$TOKEN" -X PATCH http://localhost:8080/api/products/1 \
-  -H 'Content-Type: application/merge-patch+json' \
+  -H 'Content-Type: application/json' \
   -d '{"categories": [2]}'
 
 curl -s --oauth2-bearer "$TOKEN" -o /dev/null -w '%{http_code}\n' -X DELETE http://localhost:8080/api/products/1
