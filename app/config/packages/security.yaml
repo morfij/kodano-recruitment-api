@@ -17,7 +17,8 @@ security:
             provider: users_in_memory
             access_token:
                 token_handler: App\Security\ApiTokenHandler
-            entry_point: App\Security\ApiTokenEntryPoint
+                failure_handler: App\Security\ApiTokenUnauthorizedResponse
+            entry_point: App\Security\ApiTokenUnauthorizedResponse
 
     # Note: Only the *first* matching rule is applied
     access_control:

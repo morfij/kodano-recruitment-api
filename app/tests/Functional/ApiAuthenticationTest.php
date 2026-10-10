@@ -24,10 +24,12 @@ final class ApiAuthenticationTest extends ApiTestCase
     #[DataProvider('protectedRequests')]
     public function testRequestWithoutTokenIsRejected(string $method, string $uri): void
     {
-        static::createApiClient()->request($method, $uri, ['json' => []]);
+        $response = static::createApiClient()->request($method, $uri, ['json' => []]);
 
         self::assertResponseStatusCodeSame(401);
         self::assertResponseHeaderSame('www-authenticate', 'Bearer');
+        self::assertResponseHeaderSame('content-type', 'application/problem+json');
+        self::assertSame(['type' => '/errors/401', 'title' => 'An error occurred', 'detail' => 'Missing API token.', 'status' => 401], $response->toArray(false));
     }
 
     public function testWrongTokenIsRejected(): void
@@ -36,7 +38,9 @@ final class ApiAuthenticationTest extends ApiTestCase
             ->request('POST', '/api/categories', ['json' => ['code' => 'MUGS']]);
 
         self::assertResponseStatusCodeSame(401);
-        self::assertStringStartsWith('Bearer ', $response->getHeaders(false)['www-authenticate'][0]);
+        self::assertResponseHeaderSame('www-authenticate', 'Bearer error="invalid_token"');
+        self::assertResponseHeaderSame('content-type', 'application/problem+json');
+        self::assertSame(['type' => '/errors/401', 'title' => 'An error occurred', 'detail' => 'Invalid API token.', 'status' => 401], $response->toArray(false));
         self::assertSame(0, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM category'));
     }
 
