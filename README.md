@@ -5,7 +5,7 @@ REST API for managing products and categories, built with Symfony 8.1, API Platf
 ## Requirements
 
 - Docker Engine with Docker Compose v2
-- Free ports 8080 (API) and 8025 (Mailpit); both can be changed, see [Configuration](#configuration)
+- Free ports 8080 (API), 8025 (Mailpit) and 8081 (Adminer); all can be changed, see [Configuration](#configuration)
 
 PHP, Composer and MySQL run in containers, nothing else is needed on the host.
 
@@ -77,7 +77,7 @@ Collections are paginated, 30 items per page, ordered by `id` (the operation log
 {"items": [{"id": 1, "code": "MUGS", "createdAt": "…", "updatedAt": "…"}], "totalItems": 4, "page": 1, "itemsPerPage": 30}
 ```
 
-Every request under `/api` needs the token from `API_TOKEN` in an `Authorization: Bearer <token>` header (with curl: `--oauth2-bearer "$TOKEN"`, see [Examples](#examples)); without it the API answers `401`. Swagger UI and the OpenAPI document under `/api/docs` stay public; use **Authorize** in Swagger UI to send requests from there.
+Every request under `/api` needs the token from `API_TOKEN` in an `Authorization: Bearer <token>` header (with curl: `--oauth2-bearer "$TOKEN"`, see [Examples](#examples)); without it, or with a wrong token, the API answers `401` (also as `application/problem+json`, with a `WWW-Authenticate: Bearer` header). Swagger UI and the OpenAPI document under `/api/docs` stay public; use **Authorize** in Swagger UI to send requests from there.
 
 Write requests are limited per client IP (`API_WRITE_LIMIT` per minute); over the limit the API answers `429` with a `Retry-After` header and changes nothing. Reads are not limited.
 
@@ -357,7 +357,7 @@ MySQL is not exposed on the host. Adminer runs with the other services at http:/
     │   ├── MessageHandler/    SendProductNotificationHandler
     │   ├── Notification/      NotificationChannelInterface, EmailNotificationChannel
     │   ├── OpenApi/           JsonCollectionSchemaFactory
-    │   ├── Security/          ApiTokenHandler, ApiTokenEntryPoint
+    │   ├── Security/          ApiTokenHandler, ApiTokenUnauthorizedResponse
     │   ├── Serializer/        JsonCollectionNormalizer, ProductCategoriesNormalizer
     │   └── State/             ProductStateProcessor, CategoryPersistProcessor, CategoryDeleteProcessor
     ├── templates/email/
