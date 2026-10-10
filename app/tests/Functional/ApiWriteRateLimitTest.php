@@ -8,10 +8,13 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Lock\LockFactory;
 
+/**
+ * @phpstan-type Worker array{process: resource, pipes: array<int, resource>}
+ */
 final class ApiWriteRateLimitTest extends KernelTestCase
 {
     private const int PROCESSES = 8;
-    private const int READY_TIMEOUT = 30;
+    private const int TIMEOUT = 30;
 
     public function testLimiterUsesTheLockStore(): void
     {
@@ -29,6 +32,7 @@ final class ApiWriteRateLimitTest extends KernelTestCase
         $storageDir = sys_get_temp_dir().'/api_write_limit_'.bin2hex(random_bytes(4));
         $script = \dirname(__DIR__).'/Support/consume_api_write_limit.php';
         $workers = [];
+        $closed = [];
 
         try {
             for ($i = 0; $i < self::PROCESSES; ++$i) {
@@ -37,60 +41,83 @@ final class ApiWriteRateLimitTest extends KernelTestCase
                 $workers[] = ['process' => $process, 'pipes' => $pipes];
             }
 
-            $this->waitUntilReady($workers);
+            $ready = $this->readOutputs($workers, 'start', static fn (string $output, bool $ended): bool => $ended || str_contains($output, "\n"));
+            foreach ($ready as $i => $output) {
+                self::assertSame("ready\n", $output, \sprintf('Worker %d did not start: %s', $i, $this->errors($workers)));
+            }
+
             foreach ($workers as $worker) {
                 fwrite($worker['pipes'][0], "go\n");
             }
+            $results = $this->readOutputs($workers, 'consume', static fn (string $output, bool $ended): bool => $ended);
 
-            $accepted = 0;
-            foreach ($workers as $worker) {
-                $accepted += (int) stream_get_contents($worker['pipes'][1]);
+            foreach ($workers as $i => $worker) {
+                $errors = $this->errors([$worker]);
+                $exitCode = $this->close($worker);
+                $closed[$i] = true;
+                self::assertSame(0, $exitCode, \sprintf('Worker %d failed: %s', $i, $errors));
+                self::assertContains($results[$i], ['0', '1'], \sprintf('Worker %d printed an unexpected result.', $i));
             }
 
-            self::assertSame(1, $accepted);
+            self::assertSame(1, array_sum(array_map(intval(...), $results)));
         } finally {
-            foreach ($workers as $worker) {
-                foreach ($worker['pipes'] as $pipe) {
-                    fclose($pipe);
+            foreach ($workers as $i => $worker) {
+                if (!isset($closed[$i])) {
+                    proc_terminate($worker['process']);
+                    $this->close($worker);
                 }
-                proc_terminate($worker['process']);
-                proc_close($worker['process']);
             }
             (new Filesystem())->remove($storageDir);
         }
     }
 
     /**
-     * @param list<array{process: resource, pipes: array<int, resource>}> $workers
+     * Reads every worker's stdout until $done accepts it, failing after TIMEOUT seconds.
+     *
+     * @param list<Worker>                 $workers
+     * @param callable(string, bool): bool $done    gets the output so far and whether stdout has ended
+     *
+     * @return array<int, string>
      */
-    private function waitUntilReady(array $workers): void
+    private function readOutputs(array $workers, string $stage, callable $done): array
     {
-        $waiting = array_map(static fn (array $worker) => $worker['pipes'][1], $workers);
-        $deadline = time() + self::READY_TIMEOUT;
+        $outputs = array_fill(0, \count($workers), '');
+        $pending = [];
+        foreach ($workers as $i => $worker) {
+            stream_set_blocking($worker['pipes'][1], false);
+            $pending[$i] = $worker['pipes'][1];
+        }
+        $deadline = microtime(true) + self::TIMEOUT;
 
-        while ([] !== $waiting) {
-            $timeLeft = $deadline - time();
+        while ([] !== $pending) {
+            $timeLeft = $deadline - microtime(true);
             if ($timeLeft <= 0) {
-                self::fail(\sprintf('%d worker(s) not ready after %d s: %s', \count($waiting), self::READY_TIMEOUT, $this->workerErrors($workers)));
+                self::fail(\sprintf('%d worker(s) stuck in the %s step after %d s: %s', \count($pending), $stage, self::TIMEOUT, $this->errors($workers)));
             }
 
-            $read = array_values($waiting);
+            $read = array_values($pending);
             $write = $except = null;
-            if (!stream_select($read, $write, $except, $timeLeft)) {
+            if (!stream_select($read, $write, $except, (int) $timeLeft, (int) (fmod($timeLeft, 1) * 1_000_000))) {
                 continue;
             }
 
             foreach ($read as $stream) {
-                self::assertSame("ready\n", fgets($stream), 'Unexpected worker output: '.$this->workerErrors($workers));
-                unset($waiting[array_search($stream, $waiting, true)]);
+                $i = array_search($stream, $pending, true);
+                \assert(\is_int($i));
+                $outputs[$i] .= (string) fread($stream, 8192);
+                if ($done($outputs[$i], feof($stream))) {
+                    unset($pending[$i]);
+                }
             }
         }
+
+        return $outputs;
     }
 
     /**
-     * @param list<array{process: resource, pipes: array<int, resource>}> $workers
+     * @param list<Worker> $workers
      */
-    private function workerErrors(array $workers): string
+    private function errors(array $workers): string
     {
         $errors = '';
         foreach ($workers as $worker) {
@@ -99,5 +126,17 @@ final class ApiWriteRateLimitTest extends KernelTestCase
         }
 
         return $errors;
+    }
+
+    /**
+     * @param Worker $worker
+     */
+    private function close(array $worker): int
+    {
+        foreach ($worker['pipes'] as $pipe) {
+            fclose($pipe);
+        }
+
+        return proc_close($worker['process']);
     }
 }
