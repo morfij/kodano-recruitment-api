@@ -38,6 +38,12 @@ final class JsonCollectionNormalizer extends AbstractCollectionNormalizer
         return self::FORMAT === $format ? [PaginatorInterface::class => false] : [];
     }
 
+    /**
+     * @param iterable<mixed>      $data
+     * @param array<string, mixed> $context
+     *
+     * @return array<string, mixed>
+     */
     public function normalize(mixed $data, ?string $format = null, array $context = []): array
     {
         $normalized = parent::normalize($data, $format, $context);
@@ -46,6 +52,12 @@ final class JsonCollectionNormalizer extends AbstractCollectionNormalizer
         return ['items' => $normalized['items']] + $normalized;
     }
 
+    /**
+     * @param iterable<mixed>      $object
+     * @param array<string, mixed> $context
+     *
+     * @return array{totalItems: int, page: int, itemsPerPage: int}
+     */
     protected function getPaginationData(iterable $object, array $context = []): array
     {
         \assert($object instanceof PaginatorInterface);
@@ -57,6 +69,12 @@ final class JsonCollectionNormalizer extends AbstractCollectionNormalizer
         ];
     }
 
+    /**
+     * @param iterable<mixed>      $object
+     * @param array<string, mixed> $context
+     *
+     * @return array{items: list<mixed>}
+     */
     protected function getItemsData(iterable $object, ?string $format = null, array $context = []): array
     {
         $items = [];
